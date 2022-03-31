@@ -22,8 +22,7 @@ set(PICO_CXX_ENABLE_RTTI 1)
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
-
-add_executable(KT-5 KT-5.cpp )
+add_executable(KT-5 KT-5.cpp Servo.cpp)
 
 pico_set_program_name(KT-5 "KT-5")
 pico_set_program_version(KT-5 "0.1")
@@ -43,6 +42,8 @@ target_link_libraries(KT-5
         hardware_gpio
         hardware_pwm
         hardware_irq
+        hardware_rtc
+        hardware_adc
         )
 
 pico_add_extra_outputs(KT-5)

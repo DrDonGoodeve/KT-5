@@ -9,75 +9,17 @@
 #include "hardware/irq.h"
 #include "hardware/pwm.h"
 
-int64_t alarm_callback(alarm_id_t id, void *user_data) {
-    // Put your timeout handler code in here
-    return 0;
-}
+#include "Servo.h"
 
-void on_pwm_wrap() {
-    static int fade = 0;
-    static bool going_up = true;
-    // Clear the interrupt flag that brought us here
-    pwm_clear_irq(pwm_gpio_to_slice_num(PICO_DEFAULT_LED_PIN));
 
-    if (going_up) {
-        ++fade;
-        if (fade > 255) {
-            fade = 255;
-            going_up = false;
-        }
-    } else {
-        --fade;
-        if (fade < 0) {
-            fade = 0;
-            going_up = true;
-        }
-    }
-    // Square the fade value to make the LED's brightness appear more linear
-    // Note this range matches with the wrap value
-    pwm_set_gpio_level(PICO_DEFAULT_LED_PIN, fade * fade);
-}
-
-#define kServoPWMGPIO   (14)
-#define kServoPWMFreq   (50.0f)
-#define kServoPWMPeriod (1.0f / kServoPWMFreq)
-//#define kServoPWMMin    (900.0e-6f)
-//#define kServoPWMMax    (2100.0e-6f)
-#define kServoPWMMin    (470.0e-6f)
-#define kServoPWMMax    (2650.0e-6f)
-
-#define kPicoClock      (125.0e6f)
-#define kPWMCountMax    (0x10000)
-#define kPWMFullFreq    (125.0e6f / (float)kPWMCountMax)
-
-#define kClockDivider   ((uint)ceilf(kPWMFullFreq / kServoPWMFreq))
-#define kDividedFreq    (kPWMFullFreq / (float)kClockDivider)
-#define kDividedClk     (kPicoClock / (float)kClockDivider)
-#define kDividedClkPer  (1.0f / kDividedClk)
-#define kUncorrectedPer (1.0f / (float)kDividedFreq)
-#define kExcessTime     (kUncorrectedPer - kServoPWMPeriod)
-#define kExcessClocks   ((uint)roundf(kExcessTime / kDividedClkPer))
-#define kCountMax       (kPWMCountMax - kExcessClocks)
-#define kExactPeriod    ((float)kCountMax * kDividedClkPer)
-#define kExactFreq      (1.0f / kExactPeriod)
-#define kServoCountMin  ((uint)roundf((kServoPWMMin / kExactPeriod) * (float)kCountMax))
-#define kServoCountMax  ((uint)roundf((kServoPWMMax / kExactPeriod) * (float)kCountMax))
-
-#define kTestPosn       (1.0f)
-#define kTestCount      ((uint)roundf(((1.0f - kTestPosn) * (float)(kServoCountMax - kServoCountMin))) + kServoCountMin)
-
-static
-void _setServoPosn(float fPosn, uint uSlice, uint uChan) {
-    uint uPWMCount((uint)roundf(((1.0f - fPosn) * (float)(kServoCountMax - kServoCountMin))) + kServoCountMin);
-    pwm_set_chan_level(uSlice, uChan, uPWMCount);
-}
+#define kDialServoGPIO  (14)    ///< Dial servo is on GPIO14 (pin 19)
 
 static
 float _getServoPosnForKts(float fKts) {
     fKts = ((fKts < 0.0f)?0.0f:(fKts > 8.0f)?8.0f:fKts);    // Constrain in range
     static const float pfPosn[] = {
  //       0.0f, 0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f, 0.875f, 1.0f
-        0.0f, 0.16f, 0.30f, 0.425f, 0.58f, 0.70f, 0.82f, 0.92f, 1.0f
+        0.0f, 0.17f, 0.30f, 0.425f, 0.58f, 0.70f, 0.82f, 0.92f, 1.0f
     };
     uint uPreIndex((uint)floorf(fKts)), uPostIndex((uint)ceilf(fKts));
     if (uPreIndex == uPostIndex) {
@@ -93,18 +35,8 @@ float _getServoPosnForKts(float fKts) {
 int main() {
     stdio_init_all();
 
-    // Configure GPIO kServoPWM
-    gpio_set_function(kServoPWMGPIO, GPIO_FUNC_PWM);
-    uint uSSlice(pwm_gpio_to_slice_num(kServoPWMGPIO));
-    uint uSChan(pwm_gpio_to_channel(kServoPWMGPIO));
-    pwm_set_clkdiv(uSSlice, kClockDivider);
-    pwm_set_wrap(uSSlice, kCountMax);
-
-    // Set a test value
-    pwm_set_chan_level(uSSlice, uSChan, kTestCount);
-
-    // Switch it on
-    pwm_set_enabled(uSSlice, true);
+    // Create dial servo object
+    Servo cDial(kDialServoGPIO, 0.0f, false);
 
     //  Show we are alive
     const uint LED_PIN = PICO_DEFAULT_LED_PIN;
@@ -112,15 +44,15 @@ int main() {
     gpio_set_dir(LED_PIN, GPIO_OUT);
     uint uPosn(0);
     while (true) {
-        _setServoPosn(_getServoPosnForKts(0.0f), uSSlice, uSChan);
+        cDial.setPosition(_getServoPosnForKts(0.0f));
         sleep_ms(1000);
         for(uint uKts=0; uKts<8; uKts++) {
-            printf("uKts = %d\r\n", uKts);
             for(uint uFrac=0; uFrac<100; uFrac++) {
                 float fKts((float)uKts + ((float)uFrac / 100.0f));
-                _setServoPosn(_getServoPosnForKts(fKts), uSSlice, uSChan);
+                cDial.setPosition(_getServoPosnForKts(fKts));
                 sleep_ms(10);
             }
+            printf("Fluffy uKts = %d\r\n", uKts+1);
             gpio_put(LED_PIN, 1);
             sleep_ms(80);
             gpio_put(LED_PIN, 0);
