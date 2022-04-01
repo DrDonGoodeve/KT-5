@@ -31,7 +31,7 @@ pico_enable_stdio_uart(KT-5 0)
 pico_enable_stdio_usb(KT-5 1)
 
 # Add the standard library to the build
-target_link_libraries(KT-5 pico_stdlib)
+target_link_libraries(KT-5 pico_stdlib pico_sync)
 
 # Add any user requested libraries
 target_link_libraries(KT-5
