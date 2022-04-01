@@ -20,10 +20,10 @@
 
 // Defines
 //-----------------------------------------------------------------------------
-#define kServoPWMFreq   (50.0f)
-#define kServoPWMPeriod (1.0f / kServoPWMFreq)
-#define kDefaultServoPWMMin    (470.0e-6f)
-#define kDefaultServoPWMMax    (2650.0e-6f)
+#define kServoPWMFreq           (50.0f)
+#define kServoPWMPeriod         (1.0f / kServoPWMFreq)
+#define kDefaultServoPWMMin     (470.0e-6f)
+#define kDefaultServoPWMMax     (2650.0e-6f)
 
 
 // Servo class

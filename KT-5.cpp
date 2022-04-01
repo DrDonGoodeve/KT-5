@@ -62,7 +62,7 @@ static float _getServoPosnForKts(float fKts) {
 
 // Application entry-point
 //*****************************************************************************
-void main() {
+int main(void) {
     stdio_init_all();
 
     // Create dial servo object

@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Initialise pico_sdk from installed location
 # (note this can come from environment, CMake cache etc)
-set(PICO_SDK_PATH "C:/Projects/Pico/pico-sdk")
+set(PICO_SDK_PATH "E:/Projects/Pico/pico-sdk")
+# set(PICO_SDK_PATH "pico-sdk")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
@@ -22,7 +23,7 @@ set(PICO_CXX_ENABLE_RTTI 1)
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
-add_executable(KT-5 KT-5.cpp Servo.cpp)
+add_executable(KT-5 KT-5.cpp Servo.cpp ADCEngine.cpp SpeedMeasurement.cpp)
 
 pico_set_program_name(KT-5 "KT-5")
 pico_set_program_version(KT-5 "0.1")
