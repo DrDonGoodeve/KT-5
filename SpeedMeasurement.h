@@ -26,7 +26,7 @@
 /// Primary function is to estimate speed from the transducer signal. Creates
 /// derived measurements.
 //-----------------------------------------------------------------------------
-class SpeedMeasurement {
+class SpeedMeasurement : public ADCEngine::Consumer {
     private:
         friend bool _integrationCallback(repeating_timer_t *);
 

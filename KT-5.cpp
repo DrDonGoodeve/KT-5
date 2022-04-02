@@ -29,8 +29,20 @@
 
 // Defines
 //*****************************************************************************
-#define kDialServoGPIO  (14)                  ///< Dial servo is on GPIO14 (pin 19)
-#define kAppInfo    "@lKT-5 @r@h12reloaded"   // 
+#define kDialServoGPIO      (14)   ///< Dial servo is on GPIO14 (pin 19)
+#define kAppInfo            "@lKT-5 @r@h12reloaded"   // 
+#define kADCChannel         (0)
+#define kSampleRateHz       (10.0e3f)
+#define kADCBuffer          (100.0e-3f)
+#define kADCFrames          (8)
+#define kProcessingPause    (5)
+#define kDisplayUpdatePeriod    (3000)
+
+
+// Local variables
+//*****************************************************************************
+static bool sbDisplayUpdateDue(false);
+repeating_timer_t mcDisplayTimer;
 
 
 // Local functions
@@ -62,15 +74,12 @@ static float _getServoPosnForKts(float fKts) {
     return fPosn;
 }
 
-#define kADCChannel     (0)
-#define kSampleRateHz   (10.0e3f)
-#define kADCBuffer      (100.0e-3f)
-#define kADCFrames      (8)
+// Called on timer every kDisplayUpdatePeriod msec - triggers display update
+bool _displayUpdateCallback(repeating_timer_t *pTimer) {
+    sbDisplayUpdateDue = true;  // Picked up in main loop
+    return true;
+}
 
-#define kProcessingPause    (5)
-
-
-static bool sbDisplayUpdateDue(false);
 
 // Application entry-point
 //*****************************************************************************
@@ -94,20 +103,72 @@ int main(void) {
     // Alive LED
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    gpio_put(PICO_DEFAULT_LED_PIN, 0);
     bool bAliveLEDOn(false);
+
+    // Display sequence - every 4 seconds changes
+    enum _displayCycle {
+        kDisplaySpeed = 0, 
+        kDisplayTime = 1, 
+        kDisplayAvgSpeed = 2, 
+        kDisplayDistance = 3
+    }eDisplay(kDisplaySpeed);
+    uint uCycle(0);
+
+    // Setup display update rollover timer
+    add_repeating_timer_ms(kDisplayUpdatePeriod, _displayUpdateCallback, nullptr, &mcDisplayTimer);
 
     // Main loop
     while(true) {
         while(false == sbDisplayUpdateDue) {
             if (false == cADC.processFrame(cMeasure)) {
                 sleep_ms(kProcessingPause);
+            } else {
+                // Update dial every time a new measurement is made...
+                float fKts(cMeasure.getSpeedKts());
+                cDial.setPosition(_getServoPosnForKts(fKts));               
             }
         }
         sbDisplayUpdateDue = false;
-        gpio_put()
+        
+        // Blink status
+        gpio_put(PICO_DEFAULT_LED_PIN, (true == bAliveLEDOn)?0:1);
+        bAliveLEDOn = !bAliveLEDOn;
+
+        // Update the display
+        char pBuffer[32];
+        switch(eDisplay) {
+            case kDisplaySpeed: {
+                float fKts(cMeasure.getSpeedKts());
+                sprintf(pBuffer, "@lKts: %.1f", fKts);
+                cDisplay.show(pBuffer);
+                break;
+            }
+            case kDisplayTime: {
+                uint uSec((uint)roundf(cMeasure.getSecondsElapsed()));
+                uint uHrs(uSec / 3600); uSec -= (uHrs*3600);
+                uint uMin(uSec / 60); uSec -= (uHrs*60);
+                sprintf(pBuffer, "@l%1d:%2d:%2d", uHrs, uMin, uSec);
+                break;
+            }
+            case kDisplayAvgSpeed: {
+                float fKts(cMeasure.getAvgSpeedKts());
+                sprintf(pBuffer, "@lAvg: %.1fKt", fKts);
+                cDisplay.show(pBuffer);
+                break;
+            }
+            case kDisplayDistance: {
+                float fNM(cMeasure.getDistanceTravelledNm());
+                sprintf(pBuffer, "@lDist: %.2fnm", fNM);
+                cDisplay.show(pBuffer);
+                break;
+            }
+        }
+        eDisplay = (kDisplayDistance==eDisplay)?kDisplaySpeed:(_displayCycle)((int)eDisplay+1);
     }
+}
 
-
+/*
     //  Show we are alive by driving the PICO LED output
 
 
@@ -134,3 +195,4 @@ int main(void) {
     }
 }
 
+*/
