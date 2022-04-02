@@ -24,7 +24,7 @@
 #define kK                  (1024)
 #define kMaxBytes           (100 * kK)  // Of the available 264KB
 #define kADCClock           (48.0e6f)   // 48MHz
-#define kClocksPerSample    (96)        // Hardware
+#define kClocksPerSample    (96)        // Hardware limitation
 #define kMinSampleRate      (10.0f)     // 10Hz
 #define kMaxSampleRate      (kADCClock / (float)kClocksPerSample)   // 500kHz
 

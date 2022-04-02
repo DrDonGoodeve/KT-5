@@ -22,11 +22,15 @@
 #include "hardware/pwm.h"
 
 #include "Servo.h"
+#include "ADCEngine.h"
+#include "SpeedMeasurement.h"
+#include "OLED.h"
 
 
 // Defines
 //*****************************************************************************
-#define kDialServoGPIO  (14)    ///< Dial servo is on GPIO14 (pin 19)
+#define kDialServoGPIO  (14)                  ///< Dial servo is on GPIO14 (pin 19)
+#define kAppInfo    "@lKT-5 @r@h12reloaded"   // 
 
 
 // Local functions
@@ -46,7 +50,6 @@ static float _getServoPosnForKts(float fKts) {
     // Constrain kts parameter to be in valid range
     fKts = ((fKts < 0.0f)?0.0f:(fKts > 8.0f)?8.0f:fKts);
 
-
     // Compute table indices
     uint uPreIndex((uint)floorf(fKts)), uPostIndex((uint)ceilf(fKts));
     if (uPreIndex == uPostIndex) {
@@ -59,20 +62,54 @@ static float _getServoPosnForKts(float fKts) {
     return fPosn;
 }
 
+#define kADCChannel     (0)
+#define kSampleRateHz   (10.0e3f)
+#define kADCBuffer      (100.0e-3f)
+#define kADCFrames      (8)
+
+#define kProcessingPause    (5)
+
+
+static bool sbDisplayUpdateDue(false);
 
 // Application entry-point
 //*****************************************************************************
 int main(void) {
     stdio_init_all();
 
-    // Create dial servo object
+    // Startup display
+    OLED cDisplay;
+    cDisplay.show(kAppInfo);
+
+    // Create dial servo object and zero position
     Servo cDial(kDialServoGPIO, 0.0f, false);
 
+    // Create measurement object
+    SpeedMeasurement cMeasure(kSampleRateHz);
+
+    // Create ADCEngine and start sampling
+    ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
+    cADC.setActive(true);
+
+    // Alive LED
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    bool bAliveLEDOn(false);
+
+    // Main loop
+    while(true) {
+        while(false == sbDisplayUpdateDue) {
+            if (false == cADC.processFrame(cMeasure)) {
+                sleep_ms(kProcessingPause);
+            }
+        }
+        sbDisplayUpdateDue = false;
+        gpio_put()
+    }
+
+
     //  Show we are alive by driving the PICO LED output
-    const uint LED_PIN(PICO_DEFAULT_LED_PIN);
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
-    uint uPosn(0);
+
 
     // Forever...
     while (true) {
