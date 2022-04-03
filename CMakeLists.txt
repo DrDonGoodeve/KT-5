@@ -35,6 +35,7 @@ pico_enable_stdio_usb(KT-5 1)
 target_link_libraries(KT-5 pico_stdlib pico_sync)
 
 # Add any user requested libraries
+add_subdirectory(pico-ssd1306)
 target_link_libraries(KT-5
         hardware_dma
         hardware_timer
@@ -45,6 +46,8 @@ target_link_libraries(KT-5
         hardware_irq
         hardware_rtc
         hardware_adc
+        pico_ssd1306
+        hardware_i2c
 )
 
 pico_add_extra_outputs(KT-5)
