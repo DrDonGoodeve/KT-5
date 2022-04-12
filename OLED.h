@@ -16,6 +16,7 @@
 // Includes
 //-----------------------------------------------------------------------------
 #include "pico/stdlib.h"
+#include "pico-ssd1306/ssd1306.h"
 
 
 // SpeedMeasurement class
@@ -24,6 +25,7 @@
 //-----------------------------------------------------------------------------
 class OLED {
     private:
+        pico_ssd1306::SSD1306 *mpDisplay;
 
     public:
         /// Initialize the class and set accumulated time to zero.
@@ -44,6 +46,9 @@ class OLED {
 
         // Clear and reset display
         void clear(void);
+
+        // Set display contrast
+        void setContrast(uint8_t uContrast);
 
         // Scroll out the entire display to left or right until cleared
         void scrollOut(bool bLeftNotRight);

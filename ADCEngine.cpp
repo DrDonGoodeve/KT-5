@@ -13,10 +13,12 @@
 //*****************************************************************************
 #include "ADCEngine.h"
 #include <math.h>
+#include "pico/sync.h"
 #include "hardware/gpio.h"
 #include "hardware/adc.h"
 #include "hardware/dma.h"
 #include "hardware/irq.h"
+#include "utilities.h"
 
 
 // Defines
@@ -103,26 +105,6 @@ static void _configureDMAChannel(uint uThisChannel, uint uChainToDMAChannel) {
     channel_config_set_chain_to(&cDMAConfig, uChainToDMAChannel);
     channel_config_set_irq_quiet(&cDMAConfig, false);
 }
-
-
-// Local classes
-//*****************************************************************************
-// Simple scoped object for holding and releasing a critical section as
-// required.
-//-----------------------------------------------------------------------------
-class ScopedLock {
-    private:
-        critical_section_t *mpCriticalSection;
-    public:
-        ScopedLock(critical_section_t *pCriticalSection) :
-            mpCriticalSection(pCriticalSection) {
-            critical_section_enter_blocking(mpCriticalSection);
-        }
-
-        ~ScopedLock() {
-            critical_section_exit(mpCriticalSection);
-        }
-};
 
 
 // Class methods

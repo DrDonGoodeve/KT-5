@@ -21,8 +21,8 @@
 
 // Includes
 //*****************************************************************************
-#define kI2CPin0    (12)
-#define kI2CPin1    (13)
+#define kI2C_SDA    (12)
+#define kI2C_SCL    (13)
 #define kI2CFreq    (1000000)
 
 
@@ -34,54 +34,62 @@
 /// Class method implementations
 //*****************************************************************************
 // Constructor - connect to OLED device and prepare to render
-OLED::OLED(void) {
+OLED::OLED(void) : 
+    mpDisplay(nullptr) {
+
     // Init i2c0 controller
     i2c_init(i2c0, kI2CFreq);
 
-    // Set up pins 12 and 13
-    gpio_set_function(kI2CPin0, GPIO_FUNC_I2C);
-    gpio_set_function(kI2CPin1, GPIO_FUNC_I2C);
-    gpio_pull_up(kI2CPin0);
-    gpio_pull_up(kI2CPin1);
+    // Set up GPIO12 (pin 16), GPIO13 (pin 17)
+    gpio_set_function(kI2C_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(kI2C_SCL, GPIO_FUNC_I2C);
+    gpio_pull_up(kI2C_SDA);
+    gpio_pull_up(kI2C_SCL);
 
     // Pause for SSD1306 to self-initialize (assuming called soon after boot)
-    sleep_ms(250);
+    sleep_ms(200);
 
-    // Create a new display object at address 0x3D and size of 128x64
+    // Create a new display object at address 0x3C and size of 128x32
     using namespace pico_ssd1306;
-    SSD1306 display = SSD1306(i2c0, 0x3D, Size::W128xH32);
+    mpDisplay = new SSD1306(i2c0, 0x3C, Size::W128xH32);
 
     // Here we rotate the display by 180 degrees, so that it's not upside down from my perspective
     // If your screen is upside down try setting it to 1 or 0
-    display.setOrientation(0);
-
-    // Draw text on display
-    // After passing a pointer to display, we need to tell the function what font and text to use
-    // Available fonts are listed in textRenderer's readme
-    // Last we tell this function where to anchor the text
-    // Anchor means top left of what we draw
-    // We use \x escape to use chars by their hex numeration according to the ASCII table
-    drawText(&display, font_5x8, "\x24 \xba \xb2", 0 ,0);
-    drawText(&display, font_8x8, "\x24 \xba \xb2", 0 ,10);
-    drawText(&display, font_12x16, "\x24 \xba \xb2", 0 ,20);
-    drawText(&display, font_16x32, "\x24 \xba \xb2", 0 ,36);
+    mpDisplay->setOrientation(0);
 
     // Send buffer to the display
-    display.sendBuffer();
+    mpDisplay->sendBuffer();
 }
 
 /// Destructor 
 OLED::~OLED() {
+    delete mpDisplay;
 }
 
 /// Display mechanisms
 void OLED::show(const char *pString) {
-    printf("%s/r/n", pString);
+    mpDisplay->clear();
+    drawText(mpDisplay, font_16x32, pString, 0 ,0);
+
+    for(uint i=0; i<32; i++) {
+        mpDisplay->setPixel(0, i);
+        mpDisplay->setPixel(127,i);
+    }
+    for(uint i=0; i<128; i++) {
+        mpDisplay->setPixel(i, 0);
+        mpDisplay->setPixel(i, 31);
+    }
+    mpDisplay->sendBuffer();
 }
 
 void OLED::clear(void) {
     printf("OLED clear\r\n");
 }
+
+void OLED::setContrast(uint8_t uContrast) {
+    mpDisplay->setContrast(uContrast);
+}
+
 
 void OLED::scrollOut(bool bLeftNotRight) {
     printf((true == bLeftNotRight)?"Scroll out left\r\n":"Scroll out right\r\n");
