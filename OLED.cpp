@@ -18,6 +18,8 @@
 #include "pico-ssd1306/ssd1306.h"
 #include "pico-ssd1306/textRenderer/TextRenderer.h"
 #include "hardware/i2c.h"
+using namespace pico_ssd1306;
+
 
 // Includes
 //*****************************************************************************
@@ -26,8 +28,90 @@
 #define kI2CFreq    (1000000)
 
 
+// Local types
+//*****************************************************************************
+// Extract from font data structure describing a single character
+typedef struct {
+    uint uBytes;
+    const uint8_t *pData;
+    uint uWidth;
+    uint uHeight;
+}Character;
+
+// Font header interpretation
+typedef struct {
+    uint8_t uWidth;
+    uint8_t uHeight;
+    uint8_t uFirstChar;
+    uint8_t uNumChars;
+}FontHeader;
+
+// Jump table entry interpretation
+typedef struct {
+    uint16_t uOffsetBE16;
+    uint8_t uBytes;
+    uint8_t uWidth;
+}JumpEntry;
+
+
 // Local functions
 //*****************************************************************************
+static uint _renderChar(SSD1306 *pDevice, const Character &cChar, uint uX, uint uY) {
+    const uint8_t *pCharData(cChar.pData);
+    uint8_t uByte(0x0);
+    uint uBitsRemaining(0);
+    for(uint uCol=0; uCol<cChar.uWidth; uCol++) {
+        for(uint uRow=0; uRow<cChar.uHeight; uRow++) {
+            if (0 == uBitsRemaining) {
+                uByte = *(pCharData++);
+                uBitsRemaining = 8;
+            }            
+            if ((uByte & 0x1) != 0x0) {
+                pDevice->setPixel(uX+uCol, uY+uRow);
+            }
+            uByte = (uByte>>1);
+            uBitsRemaining--;
+        }
+    }
+    return cChar.uWidth;
+}
+
+#define _bigToLittleEndian16(a)     ((((a)&0xff)<<8) | (((a)&0xff00)>>8))
+
+static void _renderVWText(SSD1306 *pDevice, const char *pText, const uint8_t *pVWFont, uint uX, uint uY) {
+    if (nullptr == pVWFont) {
+        return;
+    }
+
+    const FontHeader *pHeader(reinterpret_cast<const FontHeader*>(pVWFont));
+    uint uFirstChar(pHeader->uFirstChar), uNumChars(pHeader->uNumChars);
+    const uint8_t *pJumpBase(pVWFont + sizeof(FontHeader));
+    const uint8_t *pCharBase(pJumpBase + (uNumChars * sizeof(JumpEntry)));
+
+    const char *pChar(pText);
+    while (*pChar != '\0') {
+        uint8_t uChar(*(pChar++));
+        if ((uChar < pHeader->uFirstChar) || (uChar > (uFirstChar + uNumChars))) {
+            uChar = '?';    // Unprintable characters flagged by '?' which is assumed to be part of font
+        }
+
+        const JumpEntry *pJump(reinterpret_cast<const JumpEntry*>(pVWFont + sizeof(FontHeader) + ((uChar-pHeader->uFirstChar) * sizeof(JumpEntry))));
+        uint16_t uOffsetLE16(_bigToLittleEndian16(pJump->uOffsetBE16));
+
+        Character cChar;
+        cChar.pData = pCharBase + uOffsetLE16;
+        cChar.uBytes = pJump->uBytes;
+        cChar.uWidth = pJump->uWidth;
+        cChar.uHeight = pHeader->uHeight;
+        if (uOffsetLE16 == 0xffff) {
+            uX += cChar.uWidth;
+            continue;
+        }
+
+        uX += _renderChar(pDevice, cChar, uX, uY);
+        printf("uChar:0x%02x, pJump->uOffset=%d, cChar.uBytes=%d, cChar.uWidth=%d, cChar.uHeight=%d\r\n", uChar, uOffsetLE16, cChar.uBytes, cChar.uWidth, cChar.uHeight);
+    }
+}
 
 
 // OLED:: 
@@ -50,14 +134,13 @@ OLED::OLED(void) :
     sleep_ms(200);
 
     // Create a new display object at address 0x3C and size of 128x32
-    using namespace pico_ssd1306;
     mpDisplay = new SSD1306(i2c0, 0x3C, Size::W128xH32);
 
     // Here we rotate the display by 180 degrees, so that it's not upside down from my perspective
     // If your screen is upside down try setting it to 1 or 0
     mpDisplay->setOrientation(0);
 
-    // Send buffer to the display
+    // Send buffer to the display (clearing)
     mpDisplay->sendBuffer();
 }
 
@@ -67,18 +150,10 @@ OLED::~OLED() {
 }
 
 /// Display mechanisms
+extern const char pFontLatoMedium26[];
 void OLED::show(const char *pString) {
     mpDisplay->clear();
-    drawText(mpDisplay, font_16x32, pString, 0 ,0);
-
-    for(uint i=0; i<32; i++) {
-        mpDisplay->setPixel(0, i);
-        mpDisplay->setPixel(127,i);
-    }
-    for(uint i=0; i<128; i++) {
-        mpDisplay->setPixel(i, 0);
-        mpDisplay->setPixel(i, 31);
-    }
+    _renderVWText(mpDisplay, pString, (const uint8_t *)pFontLatoMedium26, 0 ,0);
     mpDisplay->sendBuffer();
 }
 
