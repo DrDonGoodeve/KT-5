@@ -59,15 +59,20 @@ typedef struct {
 static uint _renderChar(SSD1306 *pDevice, const Character &cChar, uint uX, uint uY) {
     const uint8_t *pCharData(cChar.pData);
     uint8_t uByte(0x0);
-    uint uBitsRemaining(0);
+    uint uBytesRemaining(cChar.uBytes);
     for(uint uCol=0; uCol<cChar.uWidth; uCol++) {
+        uint uBitsRemaining(0);
         for(uint uRow=0; uRow<cChar.uHeight; uRow++) {
             if (0 == uBitsRemaining) {
+                if (0 == uBytesRemaining) {
+                    return cChar.uWidth;    // Data exhausted - we are done
+                }
+                uBytesRemaining--;
                 uByte = *(pCharData++);
                 uBitsRemaining = 8;
             }            
             if ((uByte & 0x1) != 0x0) {
-                pDevice->setPixel(uX+uCol, uY+uRow);
+                pDevice->setPixel(uX+uCol, uY+uRow-6);
             }
             uByte = (uByte>>1);
             uBitsRemaining--;
@@ -151,9 +156,12 @@ OLED::~OLED() {
 
 /// Display mechanisms
 extern const char pFontLatoMedium26[];
+extern const char pFontLatoBlack32[];
+extern const char pFontLatoBlack38[];
+
 void OLED::show(const char *pString) {
     mpDisplay->clear();
-    _renderVWText(mpDisplay, pString, (const uint8_t *)pFontLatoMedium26, 0 ,0);
+    _renderVWText(mpDisplay, pString, (const uint8_t *)pFontLatoBlack38, 0 ,0);
     mpDisplay->sendBuffer();
 }
 

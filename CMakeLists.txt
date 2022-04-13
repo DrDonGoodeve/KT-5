@@ -23,7 +23,7 @@ set(PICO_CXX_ENABLE_RTTI 1)
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
-add_executable(KT-5 KT-5.cpp Servo.cpp ADCEngine.cpp SpeedMeasurement.cpp OLED.cpp Font-LatoMed26.cpp)
+add_executable(KT-5 KT-5.cpp Servo.cpp ADCEngine.cpp SpeedMeasurement.cpp OLED.cpp Font-LatoMed26.cpp Font-LatoBlack32.cpp Font-LatoBlack38.cpp)
 
 pico_set_program_name(KT-5 "KT-5")
 pico_set_program_version(KT-5 "0.2")
