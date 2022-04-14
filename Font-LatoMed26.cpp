@@ -1,8 +1,6 @@
 // Created by http://oleddisplay.squix.ch/ Consider a donation
 // In case of problems make sure that you are using the font file with the correct version!
-extern const char pFontLatoMedium26[];
-
-const char pFontLatoMedium26[] = {
+const char pFontLatoMed26[] = {
 	0x1B, // Width: 27
 	0x20, // Height: 32
 	0x20, // First Char: 32

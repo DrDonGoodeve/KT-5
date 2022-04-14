@@ -30,7 +30,7 @@
 // Defines
 //*****************************************************************************
 #define kDialServoGPIO      (14)   ///< Dial servo is on GPIO14 (pin 19)
-#define kAppInfo            "@lKT-5 @r@h12reloaded"   // 
+#define kAppInfo            "@(4,0,-6)KT-5@(1,86,3)relo@(1,90,15)aded..."   // 
 #define kADCChannel         (0)
 #define kSampleRateHz       (10.0e3f)
 #define kADCBuffer          (100.0e-3f)
@@ -55,8 +55,8 @@ repeating_timer_t mcDisplayTimer;
 //-----------------------------------------------------------------------------
 static float _getServoPosnForKts(float fKts) {
     static const float pfPosn[] = {	// Remapping table
-    //	0kts	1kt	2kts	3kts	4kts	5kts	6kts	7kts	8kts
-        0.0f, 	0.17f, 	0.30f, 	0.425f,	0.58f,	0.70f, 	0.82f,	0.92f,	1.0f
+    //	0kts	1kt	    2kts	3kts	4kts	5kts	6kts	7kts	8kts
+        0.0f, 	0.17f, 	0.32f, 	0.435f,	0.58f,	0.70f, 	0.83f,	0.93f,	1.0f
     };
 
     // Constrain kts parameter to be in valid range
@@ -88,10 +88,15 @@ int main(void) {
 
     // Startup display
     OLED cDisplay;
-    //cDisplay.show(kAppInfo);
+    cDisplay.show(kAppInfo);
 
     // Create dial servo object and zero position
     Servo cDial(kDialServoGPIO, 0.0f, false);
+    cDial.setPosition(1.0f);
+    sleep_ms(500);
+    cDial.setPosition(0.0f);
+    sleep_ms(2000);
+
 
     // Create measurement object
     //SpeedMeasurement cMeasure(kSampleRateHz);
@@ -177,17 +182,15 @@ int main(void) {
         cDial.setPosition(_getServoPosnForKts(0.0f));
         sleep_ms(500);
         for(uint uKts=0; uKts<8; uKts++) {
-            sleep_ms(2000);
             for(uint uFrac=0; uFrac<=100; uFrac++) {
                 float fKts((float)uKts + ((float)uFrac / 100.0f));
                 cDial.setPosition(_getServoPosnForKts(fKts));
                 sleep_ms(1);
                 if (0 == (uFrac % 10)) {
-                    sprintf(pBuffer, " %.1fkts", fKts);
+                    sprintf(pBuffer, "@(4,12,-6)%.1fkts", fKts);
                     cDisplay.show(pBuffer);
                 }
             }
-            printf("Fluffy uKts = %d\r\n", uKts+1);
             gpio_put(PICO_DEFAULT_LED_PIN, 1);
             sleep_ms(80);
             gpio_put(PICO_DEFAULT_LED_PIN, 0);
@@ -195,7 +198,7 @@ int main(void) {
             gpio_put(PICO_DEFAULT_LED_PIN, 1);
             sleep_ms(80);
             gpio_put(PICO_DEFAULT_LED_PIN, 0);
-            sleep_ms(400);        
+            sleep_ms(1000);        
         }
     }
 }

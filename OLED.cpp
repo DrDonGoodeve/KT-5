@@ -13,7 +13,10 @@
 
 // Includes
 //*****************************************************************************
+#include <cstdlib>
 #include <stdio.h>
+#include <string>
+#include <list>
 #include "OLED.h"
 #include "pico-ssd1306/ssd1306.h"
 #include "pico-ssd1306/textRenderer/TextRenderer.h"
@@ -56,7 +59,7 @@ typedef struct {
 
 // Local functions
 //*****************************************************************************
-static uint _renderChar(SSD1306 *pDevice, const Character &cChar, uint uX, uint uY) {
+static uint _renderChar(SSD1306 *pDevice, const Character &cChar, int iX, int iY) {
     const uint8_t *pCharData(cChar.pData);
     uint8_t uByte(0x0);
     uint uBytesRemaining(cChar.uBytes);
@@ -72,7 +75,7 @@ static uint _renderChar(SSD1306 *pDevice, const Character &cChar, uint uX, uint 
                 uBitsRemaining = 8;
             }            
             if ((uByte & 0x1) != 0x0) {
-                pDevice->setPixel(uX+uCol, uY+uRow-6);
+                pDevice->setPixel(iX+uCol, iY+uRow);
             }
             uByte = (uByte>>1);
             uBitsRemaining--;
@@ -83,7 +86,7 @@ static uint _renderChar(SSD1306 *pDevice, const Character &cChar, uint uX, uint 
 
 #define _bigToLittleEndian16(a)     ((((a)&0xff)<<8) | (((a)&0xff00)>>8))
 
-static void _renderVWText(SSD1306 *pDevice, const char *pText, const uint8_t *pVWFont, uint uX, uint uY) {
+static void _renderVWText(SSD1306 *pDevice, const char *pText, const uint8_t *pVWFont, int &iX, int &iY) {
     if (nullptr == pVWFont) {
         return;
     }
@@ -109,12 +112,12 @@ static void _renderVWText(SSD1306 *pDevice, const char *pText, const uint8_t *pV
         cChar.uWidth = pJump->uWidth;
         cChar.uHeight = pHeader->uHeight;
         if (uOffsetLE16 == 0xffff) {
-            uX += cChar.uWidth;
+            iX += cChar.uWidth;
             continue;
         }
 
-        uX += _renderChar(pDevice, cChar, uX, uY);
-        printf("uChar:0x%02x, pJump->uOffset=%d, cChar.uBytes=%d, cChar.uWidth=%d, cChar.uHeight=%d\r\n", uChar, uOffsetLE16, cChar.uBytes, cChar.uWidth, cChar.uHeight);
+        iX += _renderChar(pDevice, cChar, iX, iY);
+        //printf("uChar:0x%02x, pJump->uOffset=%d, cChar.uBytes=%d, cChar.uWidth=%d, cChar.uHeight=%d\r\n", uChar, uOffsetLE16, cChar.uBytes, cChar.uWidth, cChar.uHeight);
     }
 }
 
@@ -155,13 +158,101 @@ OLED::~OLED() {
 }
 
 /// Display mechanisms
-extern const char pFontLatoMedium26[];
-extern const char pFontLatoBlack32[];
-extern const char pFontLatoBlack38[];
+#define kInvalidCoord   (-1000.0f)
+class _TextElement {
+    public:
+        const char *mpFont;
+        std::string msText;
+        int miX;
+        int miY;
 
-void OLED::show(const char *pString) {
+        _TextElement(const char *pFont, const std::string sText, int iX=kInvalidCoord, int iY=kInvalidCoord) :
+            mpFont(pFont), msText(sText), miX(iX), miY(iY) {
+        }
+};
+
+#include "VWFonts.h"
+#define _arraysize(a)   (sizeof(a) / sizeof(a[0]))
+static void _split(const std::string &sTag, std::string &sFont, std::string &sX, std::string &sY) {
+    sFont = sX = sY = "";
+    size_t uFind(sTag.find(","));
+    if (std::string::npos == uFind) {
+        sFont = sTag;
+    } else {    // Found first comma
+        sFont = sTag.substr(0, uFind);
+        std::string sRemainder(sTag.substr(uFind+1));
+        uFind = sRemainder.find(",");
+        if (std::string::npos == uFind) {
+            sX = sRemainder;
+        } else {    // Found second comma
+            sX = sRemainder.substr(0, uFind);
+            sY = sRemainder.substr(uFind+1);
+        }
+    }
+    printf("split %s into %s, %s, %s\r\n", sTag.c_str(), sFont.c_str(), sX.c_str(), sY.c_str());
+}
+
+void OLED::show(const std::string &sText) {
+    static const char *pFonts[] = {
+        pFontLatoMed13, pFontLatoMed13BoldItalic, pFontLatoMed26, pFontLatoBlack32, pFontLatoBlack38
+    };
+    const char *pFont(pFonts[0]);
+
+    std::list<_TextElement> lPlotList;
+    std::string sRemaining(sText);
+    printf("sText = %s\r\n", sText.c_str());
+    int iX(kInvalidCoord), iY(kInvalidCoord);
+    while(false == sRemaining.empty()) {
+        size_t uFound(sRemaining.find("@("));
+        if (std::string::npos == uFound) {
+            lPlotList.push_back(_TextElement(pFont, sRemaining, iX, iY));
+            iX = iY = kInvalidCoord;
+            sRemaining.clear();  
+
+        } else if (uFound != 0) {
+            std::string sText(sRemaining.substr(0,uFound));
+            lPlotList.push_back(_TextElement(pFont, sText, iX, iY));
+            iX = iY = kInvalidCoord;
+            sRemaining = sRemaining.substr(uFound);
+
+        } else {
+            // Extract the tag
+            size_t uTagEnd(sRemaining.find(")", uFound+2));
+            if (std::string::npos == uTagEnd) {
+                printf("Badly formed tag at %s\r\n", sRemaining.c_str());
+                sRemaining.clear();
+            } else {   
+                std::string sTag(sRemaining.substr(uFound+2, uTagEnd-(uFound+2)));
+                sRemaining = sRemaining.substr(uTagEnd+1);
+                printf("Tag is %s\r\n", sTag.c_str());
+
+                // Interpret tag (font,x,y)
+                std::string sFont, sX, sY;
+                _split(sTag, sFont, sX, sY);
+                if (false == sFont.empty()) {
+                    int iFont(atoi(sFont.c_str()));
+                    iFont = ((iFont<0)?0:((iFont>=_arraysize(pFonts))?(_arraysize(pFonts)-1):iFont));
+                    pFont = pFonts[iFont];
+                }
+                if (false == sX.empty()) {
+                    iX = atoi(sX.c_str());
+                }
+                if (false == sY.empty()) {
+                    iY = atoi(sY.c_str());
+                }
+            }
+        }
+    }
+
     mpDisplay->clear();
-    _renderVWText(mpDisplay, pString, (const uint8_t *)pFontLatoBlack38, 0 ,0);
+    int iPlotX(0), iPlotY(0);
+    for(std::list<_TextElement>::const_iterator cIter = lPlotList.begin(); cIter != lPlotList.end(); ++cIter) {
+        const _TextElement &cE(*cIter);
+printf("Element is %s\r\n", cE.msText.c_str());
+        iPlotX = (cE.miX != kInvalidCoord)?cE.miX:iX;
+        iPlotY = (cE.miY != kInvalidCoord)?cE.miY:iY;
+        _renderVWText(mpDisplay, cE.msText.c_str(), (const uint8_t *)cE.mpFont, iPlotX, iPlotY);
+    }
     mpDisplay->sendBuffer();
 }
 
