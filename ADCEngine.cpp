@@ -44,7 +44,7 @@ void _dmaIRQHandler(void) {
     } else if (true == dma_channel_get_irq0_status(pOwner->muDMAChannelB)) {
         uIdleDMAChannel = pOwner->muDMAChannelB;
         uActiveDMAChannel = pOwner->muDMAChannelA;
-   } else {
+    } else {
         return; // Spurious interrupt...
     }
 

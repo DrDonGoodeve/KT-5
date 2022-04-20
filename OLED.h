@@ -16,6 +16,7 @@
 // Includes
 //-----------------------------------------------------------------------------
 #include "pico/stdlib.h"
+#include <string>
 #include "pico-ssd1306/ssd1306.h"
 
 
@@ -34,15 +35,11 @@ class OLED {
         /// Destructor 
         ~OLED();
 
-        /// Display mechanisms. pString is a conventional string with
-        /// embedded control codes. Default is start at top left (0,0)
-        /// after clear.
-        /// @l - large font (16x32px)
-        /// @r - regular font (12x16px)
-        /// @s - small font (8x10px)
-        /// @h<xx> - horizontal start in px (0-127)
-        /// @v<xx> - vertical start in px (0-31)
-        void show(const char *pString);
+        /// Display mechanisms. sString may contain embedded
+        /// control information using a tag format of
+        /// '@(<tag>)' where <tag> is one of:
+        /// <font>, <font><iX><iY>
+        void show(const std::string &sText);
 
         // Clear and reset display
         void clear(void);

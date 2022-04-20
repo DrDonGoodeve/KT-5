@@ -76,6 +76,8 @@ static uint _renderChar(SSD1306 *pDevice, const Character &cChar, int iX, int iY
             }            
             if ((uByte & 0x1) != 0x0) {
                 pDevice->setPixel(iX+uCol, iY+uRow);
+                //pDevice->setPixel(iX+uCol, iY+(2*uRow));
+                //pDevice->setPixel(iX+uCol, iY+(2*uRow)+1);
             }
             uByte = (uByte>>1);
             uBitsRemaining--;
@@ -142,7 +144,8 @@ OLED::OLED(void) :
     sleep_ms(200);
 
     // Create a new display object at address 0x3C and size of 128x32
-    mpDisplay = new SSD1306(i2c0, 0x3C, Size::W128xH32);
+    //mpDisplay = new SSD1306(i2c0, 0x3C, Size::W128xH32);
+    mpDisplay = new SSD1306(i2c0, 0x3C, Size::W128xH64);
 
     // Here we rotate the display by 180 degrees, so that it's not upside down from my perspective
     // If your screen is upside down try setting it to 1 or 0
@@ -189,7 +192,6 @@ static void _split(const std::string &sTag, std::string &sFont, std::string &sX,
             sY = sRemainder.substr(uFind+1);
         }
     }
-    printf("split %s into %s, %s, %s\r\n", sTag.c_str(), sFont.c_str(), sX.c_str(), sY.c_str());
 }
 
 void OLED::show(const std::string &sText) {
@@ -200,7 +202,6 @@ void OLED::show(const std::string &sText) {
 
     std::list<_TextElement> lPlotList;
     std::string sRemaining(sText);
-    printf("sText = %s\r\n", sText.c_str());
     int iX(kInvalidCoord), iY(kInvalidCoord);
     while(false == sRemaining.empty()) {
         size_t uFound(sRemaining.find("@("));
@@ -224,7 +225,6 @@ void OLED::show(const std::string &sText) {
             } else {   
                 std::string sTag(sRemaining.substr(uFound+2, uTagEnd-(uFound+2)));
                 sRemaining = sRemaining.substr(uTagEnd+1);
-                printf("Tag is %s\r\n", sTag.c_str());
 
                 // Interpret tag (font,x,y)
                 std::string sFont, sX, sY;
@@ -248,7 +248,6 @@ void OLED::show(const std::string &sText) {
     int iPlotX(0), iPlotY(0);
     for(std::list<_TextElement>::const_iterator cIter = lPlotList.begin(); cIter != lPlotList.end(); ++cIter) {
         const _TextElement &cE(*cIter);
-printf("Element is %s\r\n", cE.msText.c_str());
         iPlotX = (cE.miX != kInvalidCoord)?cE.miX:iX;
         iPlotY = (cE.miY != kInvalidCoord)?cE.miY:iY;
         _renderVWText(mpDisplay, cE.msText.c_str(), (const uint8_t *)cE.mpFont, iPlotX, iPlotY);

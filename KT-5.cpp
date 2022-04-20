@@ -30,7 +30,8 @@
 // Defines
 //*****************************************************************************
 #define kDialServoGPIO      (14)   ///< Dial servo is on GPIO14 (pin 19)
-#define kAppInfo            "@(4,0,-6)KT-5@(1,86,3)relo@(1,90,15)aded..."   // 
+//#define kAppInfo            "@(4,0,-6)KT-5@(1,86,3)relo@(1,90,15)aded..."   // 
+#define kAppInfo            "@(4,16,-6)KT-5@(1,48,32)reloaded..."   // 
 #define kADCChannel         (0)
 #define kSampleRateHz       (10.0e3f)
 #define kADCBuffer          (100.0e-3f)
@@ -97,13 +98,12 @@ int main(void) {
     cDial.setPosition(0.0f);
     sleep_ms(2000);
 
-
     // Create measurement object
-    //SpeedMeasurement cMeasure(kSampleRateHz);
+    SpeedMeasurement cMeasure(kSampleRateHz);
 
     // Create ADCEngine and start sampling
-//    ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
-//    cADC.setActive(true);
+    ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
+    cADC.setActive(true);
 
     // Alive LED
     gpio_init(PICO_DEFAULT_LED_PIN);
@@ -178,6 +178,7 @@ int main(void) {
     //  Show we are alive by driving the PICO LED output
     // Forever...
     char pBuffer[32];
+    uint uStep(0);
     while (true) {
         cDial.setPosition(_getServoPosnForKts(0.0f));
         sleep_ms(500);
@@ -187,7 +188,13 @@ int main(void) {
                 cDial.setPosition(_getServoPosnForKts(fKts));
                 sleep_ms(1);
                 if (0 == (uFrac % 10)) {
-                    sprintf(pBuffer, "@(4,12,-6)%.1fkts", fKts);
+                    switch (uStep) {
+                        //sprintf(pBuffer, "@(4,12,-6)%.1fkts", fKts);
+                        case 0: sprintf(pBuffer, "@(4,40,-6)%.1f@(2,10,34)K N O T S", fKts); break;
+                        case 1: sprintf(pBuffer, "@(4,30,-6)%.2f@(2,20,34)SEA nm", fKts); break;
+                        case 2: sprintf(pBuffer, "@(3,0,-4)%02d:%02d:%02d@(2,10,34)ELAPSED", (int)(fKts*10.0f), (int)(fKts*10.0f), (int)(fKts*10.0f)); break;
+                        case 3: default: sprintf(pBuffer, "@(4,16,-6)%.3f@(2,20,34)avg KTS", fKts); break;
+                    }
                     cDisplay.show(pBuffer);
                 }
             }
@@ -200,6 +207,7 @@ int main(void) {
             gpio_put(PICO_DEFAULT_LED_PIN, 0);
             sleep_ms(1000);        
         }
+        uStep = ((uStep+1)%4);
     }
 }
 #endif // _FULLAPP
