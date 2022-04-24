@@ -19,7 +19,7 @@
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include "utilities.h"
-
+#include <cstdio>
 
 // Defines
 //*****************************************************************************
@@ -34,6 +34,7 @@
 // Local functions
 //*****************************************************************************
 void _dmaIRQHandler(void) {
+    printf(".");
     ADCEngine *pOwner(ADCEngine::mspSelf);
 
     // Which channel interrupted (other channel is now running)
@@ -284,6 +285,7 @@ bool ADCEngine::processFrame(Consumer &cConsumer) {
     }
 
     // Consumer now has exclusive access to frame
+    printf("Calling Consumer.process\r\n");
     cConsumer.process(cFrame);
 
     // Release consumed frame

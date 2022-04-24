@@ -1,6 +1,5 @@
 // Created by http://oleddisplay.squix.ch/ Consider a donation
 // In case of problems make sure that you are using the font file with the correct version!
-extern const char pFontLatoBlack38[];
 const char pFontLatoBlack38[] = {
 	0x28, // Width: 40
 	0x2F, // Height: 47

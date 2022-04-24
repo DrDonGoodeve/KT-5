@@ -102,8 +102,8 @@ int main(void) {
     SpeedMeasurement cMeasure(kSampleRateHz);
 
     // Create ADCEngine and start sampling
-    ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
-    cADC.setActive(true);
+   //  ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
+    //cADC.setActive(true);
 
     // Alive LED
     gpio_init(PICO_DEFAULT_LED_PIN);
@@ -111,6 +111,7 @@ int main(void) {
     gpio_put(PICO_DEFAULT_LED_PIN, 0);
     bool bAliveLEDOn(false);
 
+//#define _FULLAPP
 #ifdef _FULLAPP
     // Display sequence - every 4 seconds changes
     enum _displayCycle {
@@ -146,30 +147,28 @@ int main(void) {
         switch(eDisplay) {
             case kDisplaySpeed: {
                 float fKts(cMeasure.getSpeedKts());
-                sprintf(pBuffer, "@lKts: %.1f", fKts);
-                cDisplay.show(pBuffer);
+                sprintf(pBuffer, "@(4,40,-6)%.1f@(2,10,34)K N O T S", fKts); 
                 break;
             }
             case kDisplayTime: {
                 uint uSec((uint)roundf(cMeasure.getSecondsElapsed()));
                 uint uHrs(uSec / 3600); uSec -= (uHrs*3600);
                 uint uMin(uSec / 60); uSec -= (uHrs*60);
-                sprintf(pBuffer, "@l%1d:%2d:%2d", uHrs, uMin, uSec);
+                sprintf(pBuffer, "@(3,0,-4)%02d:%02d:%02d@(2,10,34)ELAPSED", uHrs, uMin, uSec);
                 break;
             }
             case kDisplayAvgSpeed: {
-                float fKts(cMeasure.getAvgSpeedKts());
-                sprintf(pBuffer, "@lAvg: %.1fKt", fKts);
-                cDisplay.show(pBuffer);
+                float fKtsAvg(cMeasure.getAvgSpeedKts());
+                sprintf(pBuffer, "@(4,16,-6)%.3f@(2,20,34)avg KTS", fKtsAvg);
                 break;
             }
-            case kDisplayDistance: {
+            case kDisplayDistance: default: {
                 float fNM(cMeasure.getDistanceTravelledNm());
-                sprintf(pBuffer, "@lDist: %.2fnm", fNM);
-                cDisplay.show(pBuffer);
+                sprintf(pBuffer, "@(4,30,-6)%.2f@(2,20,34)SEA nm", fNM);
                 break;
             }
         }
+        cDisplay.show(pBuffer);
         eDisplay = (kDisplayDistance==eDisplay)?kDisplaySpeed:(_displayCycle)((int)eDisplay+1);
     }
 }

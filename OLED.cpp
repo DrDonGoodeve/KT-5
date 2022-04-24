@@ -26,8 +26,10 @@ using namespace pico_ssd1306;
 
 // Includes
 //*****************************************************************************
-#define kI2C_SDA    (12)
-#define kI2C_SCL    (13)
+//#define kI2C_SDA    (12)
+//#define kI2C_SCL    (13)
+#define kI2C_SDA    (18)
+#define kI2C_SCL    (19)
 #define kI2CFreq    (1000000)
 
 
@@ -132,7 +134,8 @@ OLED::OLED(void) :
     mpDisplay(nullptr) {
 
     // Init i2c0 controller
-    i2c_init(i2c0, kI2CFreq);
+    //i2c_init(i2c0, kI2CFreq);
+    i2c_init(i2c1, kI2CFreq);
 
     // Set up GPIO12 (pin 16), GPIO13 (pin 17)
     gpio_set_function(kI2C_SDA, GPIO_FUNC_I2C);
@@ -145,7 +148,8 @@ OLED::OLED(void) :
 
     // Create a new display object at address 0x3C and size of 128x32
     //mpDisplay = new SSD1306(i2c0, 0x3C, Size::W128xH32);
-    mpDisplay = new SSD1306(i2c0, 0x3C, Size::W128xH64);
+    //mpDisplay = new SSD1306(i2c0, 0x3C, Size::W128xH64);
+    mpDisplay = new SSD1306(i2c1, 0x3C, Size::W128xH64);
 
     // Here we rotate the display by 180 degrees, so that it's not upside down from my perspective
     // If your screen is upside down try setting it to 1 or 0
