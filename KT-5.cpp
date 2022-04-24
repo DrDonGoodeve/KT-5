@@ -29,14 +29,14 @@
 
 // Defines
 //*****************************************************************************
-#define kDialServoGPIO      (14)   ///< Dial servo is on GPIO14 (pin 19)
+#define kDialServoGPIO          (14)   ///< Dial servo is on GPIO14 (pin 19)
 //#define kAppInfo            "@(4,0,-6)KT-5@(1,86,3)relo@(1,90,15)aded..."   // 
-#define kAppInfo            "@(4,16,-6)KT-5@(1,48,32)reloaded..."   // 
-#define kADCChannel         (0)
-#define kSampleRateHz       (10.0e3f)
-#define kADCBuffer          (500.0e-3f)
-#define kADCFrames          (4)
-#define kProcessingPause    (5)
+#define kAppInfo                "@(4,16,-6)KT-5@(1,48,32)reloaded..."   // 
+#define kADCChannel             (0)
+#define kSampleRateHz           (10.0e3f)
+#define kADCBuffer              (500.0e-3f)
+#define kADCFrames              (4)
+#define kProcessingPause        (50)
 #define kDisplayUpdatePeriod    (3000)
 
 
@@ -77,6 +77,7 @@ static float _getServoPosnForKts(float fKts) {
 
 // Called on timer every kDisplayUpdatePeriod msec - triggers display update
 bool _displayUpdateCallback(repeating_timer_t *pTimer) {
+    printf("_displayUpdateCallback\r\n");
     sbDisplayUpdateDue = true;  // Picked up in main loop
     return true;
 }
@@ -137,6 +138,7 @@ int main(void) {
     while(true) {
         while(false == sbDisplayUpdateDue) {
             if (false == cADC.processFrame(cMeasure)) {
+                printf(".");
                 sleep_ms(kProcessingPause);
             } else {
                 // Update dial every time a new measurement is made...
@@ -151,7 +153,7 @@ int main(void) {
         bAliveLEDOn = !bAliveLEDOn;
 
         // Update the display
-        char pBuffer[32];
+        char pBuffer[64];
         switch(eDisplay) {
             case kDisplaySpeed: {
                 float fKts(cMeasure.getSpeedKts());
@@ -167,6 +169,8 @@ int main(void) {
             }
             case kDisplayAvgSpeed: {
                 float fKtsAvg(cMeasure.getAvgSpeedKts());
+                //uint uKtsAvg((uint)floorf(fKtsAvg));
+                //sprintf(pBuffer, "@(4,16,-6)%.3f@(2,20,34)avg KTS", uKtsAvg, (uint)roundf(((fKtsAvg-(float)uKtsAvg)*1000.0f)));
                 sprintf(pBuffer, "@(4,16,-6)%.3f@(2,20,34)avg KTS", fKtsAvg);
                 break;
             }
@@ -176,8 +180,10 @@ int main(void) {
                 break;
             }
         }
-        cDisplay.show(pBuffer);
         eDisplay = (kDisplayDistance==eDisplay)?kDisplaySpeed:(_displayCycle)((int)eDisplay+1);
+        //continue;
+        
+        cDisplay.show(pBuffer);
     }
 }
 

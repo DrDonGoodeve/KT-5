@@ -49,6 +49,12 @@ class ADCEngine {
                     muSequence(0), mpSamples(pSamples), muCount(uCount) {
                 }
 
+                void clear(void) {
+                    muSequence = 0;
+                    mpSamples = nullptr;
+                    muCount = 0;
+                }
+
                 bool isEmpty(void) const {
                     return (nullptr == mpSamples);
                 }
@@ -83,7 +89,6 @@ class ADCEngine {
         float mfSampleRateHz;       // Actual sample rate achieved
         uint muClockDivisor;        // Clock divisor to proce requested sample rate
         uint muDMAChannelA;         // Uses two DMA channels (chained)
-        uint muDMAChannelB;
         Consumer *mpLastConsumer;   // Last attached consumer object
         uint muSequence;            // Sequence number
 
@@ -92,10 +97,10 @@ class ADCEngine {
         critical_section_t mcStoreLock;    // IRQ and multicore safe mutex
         std::list<Frame> mlSignalBuffer;   // Allocated data in signal sequence order
         std::list<Frame> mlFreeList;       // Available blocks in arbitrary order
-        std::list<Frame> mlDMAList;        // Frames attached to DMA channels in FIFO order
+        Frame mcDMAFrame;                  // Current DMA target frame
 
         friend void _dmaIRQHandler(void);  // Has access to this class
-        static ADCEngine *mspSelf;          // Singleton pointer
+        static ADCEngine *mspSelf;         // Singleton pointer
 
     public:
         /// Construct an ADCEngine object. The object sets up a single ADC Channel

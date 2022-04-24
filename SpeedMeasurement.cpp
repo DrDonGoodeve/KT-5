@@ -44,7 +44,7 @@ bool _integrationCallback(repeating_timer_t *pTimer) {
 // Implementation of SpeedMeasurement class.
 //-----------------------------------------------------------------------------
 SpeedMeasurement::SpeedMeasurement(float fSampleRateHz) :
-    mfSampleRateHz(fSampleRateHz), 
+    mfSampleRateHz(fSampleRateHz), mfIntegratedSpeedKts(0.0f),
     mfCurrentSpeedKts(0.0f), mfDistanceTravelledNm(0.0f), muElapsedTimeSec(0) {
 
     // Start 1 second timer (integration mechanism)
@@ -62,6 +62,7 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
     // Simple processing - take peak value and make FSD 8kts
     uint8_t *pData(cFrame.mpSamples);
     uint uCount(cFrame.muCount);
+    printf("SpeedMeasurement::process pData=0x%08x, uCount=%d\r\n", pData, uCount);
     uint8_t uMax(0);
     for(uint i=0; i<uCount; i++) {
         uint8_t uValue(*(pData++));
