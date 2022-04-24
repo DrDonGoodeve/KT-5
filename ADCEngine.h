@@ -89,9 +89,10 @@ class ADCEngine {
 
         uint8_t *mpBuffer;          // Buffer from which mlSignalList, mlFreeList frames come...
         
-        critical_section_t mcStoreLock;     // IRQ and multicore safe mutex
+        critical_section_t mcStoreLock;    // IRQ and multicore safe mutex
         std::list<Frame> mlSignalBuffer;   // Allocated data in signal sequence order
         std::list<Frame> mlFreeList;       // Available blocks in arbitrary order
+        std::list<Frame> mlDMAList;        // Frames attached to DMA channels in FIFO order
 
         friend void _dmaIRQHandler(void);  // Has access to this class
         static ADCEngine *mspSelf;          // Singleton pointer

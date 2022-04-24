@@ -33,8 +33,8 @@
 
 // Local functions
 //*****************************************************************************
+// 0.!?0.!?0.
 void _dmaIRQHandler(void) {
-    printf(".");
     ADCEngine *pOwner(ADCEngine::mspSelf);
 
     // Which channel interrupted (other channel is now running)
@@ -49,24 +49,35 @@ void _dmaIRQHandler(void) {
         return; // Spurious interrupt...
     }
 
+    // Clear the interrupt for uIdleDMAChannel
+    dma_hw->ints0 = 0x1 << uIdleDMAChannel;
+    printf("%d.", uIdleDMAChannel);
+
+    // Pull from mlDMAList and place in signal list
+    ADCEngine::Frame cFilledFrame(pOwner->mlDMAList.front());
+    pOwner->mlDMAList.pop_front();
+    pOwner->mlSignalBuffer.push_back(cFilledFrame);
+
     // Find the next target buffer - from free list, or overwrite oldest in
     // signal if there are none left (consumer not keeping up...)
-    ADCEngine::Frame cNewFrame;
+    ADCEngine::Frame cFreshFrame;
     if (false == pOwner->mlFreeList.empty()) {
-        cNewFrame = pOwner->mlFreeList.front();
+        cFreshFrame = pOwner->mlFreeList.front();
         pOwner->mlFreeList.pop_front();
     } else if (false == pOwner->mlSignalBuffer.empty()) {
-        cNewFrame = pOwner->mlSignalBuffer.front(); // Oldest signal discarded
+        cFreshFrame = pOwner->mlSignalBuffer.front(); // Oldest signal discarded
         pOwner->mlSignalBuffer.pop_front();
     }
-    if (true == cNewFrame.isEmpty()) {
+    if (true == cFreshFrame.isEmpty()) {
         return; // Should be impossible - protect from using stupid values below...
     }
+    printf("!");
 
-    // Set up for next transfer - do not start yet...
-    cNewFrame.muSequence = pOwner->muSequence++;	// Set next sequence number
-    dma_channel_set_write_addr(uIdleDMAChannel, cNewFrame.mpSamples, false);
-    dma_channel_set_trans_count(uIdleDMAChannel, cNewFrame.muCount, false); 
+    // Set up for next transfer - do not start yet... (chained)
+    cFreshFrame.muSequence = pOwner->muSequence++;	// Set next sequence number
+    pOwner->mlDMAList.push_back(cFreshFrame);
+    dma_channel_set_write_addr(uIdleDMAChannel, cFreshFrame.mpSamples, false);
+    dma_channel_set_trans_count(uIdleDMAChannel, cFreshFrame.muCount, false); 
 
     // If active channel is no longer active, trigger this channel
     // (This should be achieved by chaining however this reduces the race condition
@@ -76,10 +87,8 @@ void _dmaIRQHandler(void) {
     //  here will not intefere with this process.)
     if (false == dma_channel_is_busy(uActiveDMAChannel)) {
         dma_channel_start(uIdleDMAChannel);     // Idle no more...
+        printf("?");
     }
-     
-    // Clear the interrupt for uIdleDMAChannel
-    dma_hw->ints0 = 0x1 << uIdleDMAChannel;
 }
 
 
@@ -104,6 +113,7 @@ static void _configureDMAChannel(uint uThisChannel, uint uChainToDMAChannel) {
     );
 
     channel_config_set_chain_to(&cDMAConfig, uChainToDMAChannel);
+    printf("Chain DMA %d to DMA %d\r\n", uThisChannel, uChainToDMAChannel);
     channel_config_set_irq_quiet(&cDMAConfig, false);
 }
 
@@ -131,6 +141,7 @@ ADCEngine::ADCEngine(
     fSampleRateHz = (fSampleRateHz < kMinSampleRate)?kMinSampleRate:((fSampleRateHz > kMaxSampleRate)?kMaxSampleRate:fSampleRateHz);
     muClockDivisor = (uint)roundf(kADCClock / fSampleRateHz);
     mfSampleRateHz = kADCClock / (float)muClockDivisor;
+    printf("Sample Rate Hz = %.0f, muClockDivisor=%d\r\n", mfSampleRateHz, muClockDivisor);
 
     // Compute buffer dimensions (note that a sample is 8-bits - ie. a byte)
     uint uSamples((uint)roundf(fBufferTimeSec * fSampleRateHz));
@@ -142,12 +153,15 @@ ADCEngine::ADCEngine(
         mspSelf = nullptr;
         return;
     }
+    printf("uSamples = %d, uFrameSize = %d\r\n", uSamples, uFrameSize);
+    printf("Frame time = %.0f msec\r\n", ((float)uFrameSize / mfSampleRateHz) * 1000.0f);
 
     // Setup free list - signal list is empty
     for(uint i=0; i<uFrames; i++) {
         Frame cFrame(mpBuffer + (i*uFrameSize), uFrameSize);
         mlFreeList.push_back(cFrame);
     }
+    printf("Freelist contains %d frames\r\n", mlFreeList.size());
 
     // Initialize critical section
     critical_section_init(&mcStoreLock);
@@ -166,12 +180,15 @@ ADCEngine::ADCEngine(
     );
     adc_set_clkdiv(muClockDivisor);
 
+    printf("uADCChannel = %d, muClockDivisor=%d\r\n", uADCChannel, muClockDivisor);
+
     // Claim DMA resources (panic and fail if not available)
     muDMAChannelA = dma_claim_unused_channel(true);
     muDMAChannelB = dma_claim_unused_channel(true);
 
     // So far, so good
     mbIsValid = true;
+    printf("ADC init success\r\n");
 }
 
 /// Destructor - deallocate resources and shut down
@@ -243,22 +260,30 @@ bool ADCEngine::setActive(bool bActive) {
             cFrameA = mlFreeList.front();
             cFrameA.muSequence = muSequence++;
             mlFreeList.pop_front();
+            mlDMAList.push_back(cFrameA);
+
             cFrameB = mlFreeList.front();
             cFrameB.muSequence = muSequence++;
             mlFreeList.pop_front();
+            mlDMAList.push_back(cFrameB);
         }
 
         // Configure both channels and start muDMAChannelA
         dma_channel_set_write_addr(muDMAChannelB, cFrameB.mpSamples, false);
         dma_channel_set_trans_count(muDMAChannelB, cFrameB.muCount, false);
         dma_channel_set_write_addr(muDMAChannelA, cFrameA.mpSamples, false);
-        dma_channel_set_trans_count(muDMAChannelB, cFrameA.muCount, true); // Go!
+        dma_channel_set_trans_count(muDMAChannelA, cFrameA.muCount, true); 
+        printf("A .mpSamples=0x%08x, .muCount=%d\r\n", cFrameA.mpSamples, cFrameA.muCount);
+ 
+        // And kick off the adc
+        adc_run(true);
 
         mbIsRunning = true;
         return true;
 
     } else {
         // Stop everything - switch off and disable interrupts
+        adc_run(false);
         dma_channel_abort(muDMAChannelA);
         dma_channel_abort(muDMAChannelB);
         irq_set_enabled(DMA_IRQ_0, false);

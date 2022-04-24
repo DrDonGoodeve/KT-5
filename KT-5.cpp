@@ -34,8 +34,8 @@
 #define kAppInfo            "@(4,16,-6)KT-5@(1,48,32)reloaded..."   // 
 #define kADCChannel         (0)
 #define kSampleRateHz       (10.0e3f)
-#define kADCBuffer          (100.0e-3f)
-#define kADCFrames          (8)
+#define kADCBuffer          (500.0e-3f)
+#define kADCFrames          (4)
 #define kProcessingPause    (5)
 #define kDisplayUpdatePeriod    (3000)
 
@@ -98,20 +98,28 @@ int main(void) {
     cDial.setPosition(0.0f);
     sleep_ms(2000);
 
-    // Create measurement object
-    SpeedMeasurement cMeasure(kSampleRateHz);
-
-    // Create ADCEngine and start sampling
-   //  ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
-    //cADC.setActive(true);
-
     // Alive LED
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
     gpio_put(PICO_DEFAULT_LED_PIN, 0);
     bool bAliveLEDOn(false);
 
-//#define _FULLAPP
+    // 10 second warning to get UART connection
+    for(uint i=0; i<10; i++) {
+        gpio_put(PICO_DEFAULT_LED_PIN, 1);
+        sleep_ms(20);
+        gpio_put(PICO_DEFAULT_LED_PIN, 0);
+        sleep_ms(980);
+    }
+
+    // Create measurement object
+    SpeedMeasurement cMeasure(kSampleRateHz);
+
+    // Create ADCEngine and start sampling
+    ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
+    cADC.setActive(true);
+
+#define _FULLAPP
 #ifdef _FULLAPP
     // Display sequence - every 4 seconds changes
     enum _displayCycle {
@@ -153,7 +161,7 @@ int main(void) {
             case kDisplayTime: {
                 uint uSec((uint)roundf(cMeasure.getSecondsElapsed()));
                 uint uHrs(uSec / 3600); uSec -= (uHrs*3600);
-                uint uMin(uSec / 60); uSec -= (uHrs*60);
+                uint uMin(uSec / 60); uSec -= (uMin*60);
                 sprintf(pBuffer, "@(3,0,-4)%02d:%02d:%02d@(2,10,34)ELAPSED", uHrs, uMin, uSec);
                 break;
             }
