@@ -37,12 +37,27 @@
 #define kADCBuffer              (500.0e-3f)
 #define kADCFrames              (4)
 #define kProcessingPause        (50)
-#define kDisplayUpdatePeriod    (3000)
+#define kDisplayUpdatePeriod        (2000)
+#define kDisplayUpdateTimerPeriod   (200)
+
+
+// Local types
+//*****************************************************************************
+// Display sequence - every 4 seconds changes
+typedef enum _displayCycle {
+    kDisplaySpeed = 0, 
+    kDisplayTime = 1, 
+    kDisplayAvgSpeed = 2, 
+    kDisplayDistance = 3
+}DisplayCycle;
 
 
 // Local variables
 //*****************************************************************************
 static bool sbDisplayUpdateDue(false);
+static DisplayCycle seDisplayCycle(kDisplaySpeed);
+static uint suTimersBeforeDisplayChange(0);
+
 repeating_timer_t mcDisplayTimer;
 
 
@@ -79,6 +94,12 @@ static float _getServoPosnForKts(float fKts) {
 bool _displayUpdateCallback(repeating_timer_t *pTimer) {
     printf("_displayUpdateCallback\r\n");
     sbDisplayUpdateDue = true;  // Picked up in main loop
+    if (0 == suTimersBeforeDisplayChange) {
+        suTimersBeforeDisplayChange = kDisplayUpdatePeriod / kDisplayUpdateTimerPeriod;
+        seDisplayCycle = (kDisplayDistance==seDisplayCycle)?kDisplaySpeed:(_displayCycle)((int)seDisplayCycle+1);
+    } else {
+        suTimersBeforeDisplayChange--;
+    }
     return true;
 }
 
@@ -122,17 +143,8 @@ int main(void) {
 
 #define _FULLAPP
 #ifdef _FULLAPP
-    // Display sequence - every 4 seconds changes
-    enum _displayCycle {
-        kDisplaySpeed = 0, 
-        kDisplayTime = 1, 
-        kDisplayAvgSpeed = 2, 
-        kDisplayDistance = 3
-    }eDisplay(kDisplaySpeed);
-    uint uCycle(0);
-
-    // Setup display update rollover timer
-    add_repeating_timer_ms(kDisplayUpdatePeriod, _displayUpdateCallback, nullptr, &mcDisplayTimer);
+   // Setup display update rollover timer
+    add_repeating_timer_ms(kDisplayUpdateTimerPeriod, _displayUpdateCallback, nullptr, &mcDisplayTimer);
 
     // Main loop
     while(true) {
@@ -154,7 +166,7 @@ int main(void) {
 
         // Update the display
         char pBuffer[64];
-        switch(eDisplay) {
+        switch(seDisplayCycle) {
             case kDisplaySpeed: {
                 float fKts(cMeasure.getSpeedKts());
                 sprintf(pBuffer, "@(4,40,-6)%.1f@(2,10,34)K N O T S", fKts); 
@@ -180,9 +192,7 @@ int main(void) {
                 break;
             }
         }
-        eDisplay = (kDisplayDistance==eDisplay)?kDisplaySpeed:(_displayCycle)((int)eDisplay+1);
-        //continue;
-        
+
         cDisplay.show(pBuffer);
     }
 }
