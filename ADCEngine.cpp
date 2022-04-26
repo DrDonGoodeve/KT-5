@@ -123,7 +123,7 @@ ADCEngine::ADCEngine(
     fSampleRateHz = (fSampleRateHz < kMinSampleRate)?kMinSampleRate:((fSampleRateHz > kMaxSampleRate)?kMaxSampleRate:fSampleRateHz);
     muClockDivisor = (uint)roundf(kADCClock / fSampleRateHz);
     mfSampleRateHz = kADCClock / (float)muClockDivisor;
-    printf("Sample Rate Hz = %.0f, muClockDivisor=%d\r\n", mfSampleRateHz, muClockDivisor);
+    //printf("Sample Rate Hz = %.0f, muClockDivisor=%d\r\n", mfSampleRateHz, muClockDivisor);
 
     // Compute buffer dimensions (note that a sample is 8-bits - ie. a byte)
     uint uSamples((uint)roundf(fBufferTimeSec * fSampleRateHz));
@@ -135,15 +135,15 @@ ADCEngine::ADCEngine(
         mspSelf = nullptr;
         return;
     }
-    printf("uSamples = %d, uFrameSize = %d\r\n", uSamples, uFrameSize);
-    printf("Frame time = %.0f msec\r\n", ((float)uFrameSize / mfSampleRateHz) * 1000.0f);
+    //printf("uSamples = %d, uFrameSize = %d\r\n", uSamples, uFrameSize);
+    //printf("Frame time = %.0f msec\r\n", ((float)uFrameSize / mfSampleRateHz) * 1000.0f);
 
     // Setup free list - signal list is empty
     for(uint i=0; i<uFrames; i++) {
         Frame cFrame(mpBuffer + (i*uFrameSize), uFrameSize);
         mlFreeList.push_back(cFrame);
     }
-    printf("Freelist contains %d frames\r\n", mlFreeList.size());
+    //printf("Freelist contains %d frames\r\n", mlFreeList.size());
 
     // Initialize critical section
     critical_section_init(&mcStoreLock);
@@ -162,14 +162,14 @@ ADCEngine::ADCEngine(
     );
     adc_set_clkdiv(muClockDivisor);
 
-    printf("uADCChannel = %d, muClockDivisor=%d\r\n", uADCChannel, muClockDivisor);
+    //printf("uADCChannel = %d, muClockDivisor=%d\r\n", uADCChannel, muClockDivisor);
 
     // Claim DMA resources (panic and fail if not available)
     muDMAChannelA = dma_claim_unused_channel(true);
 
     // So far, so good
     mbIsValid = true;
-    printf("ADC init success\r\n");
+    //printf("ADC init success\r\n");
 }
 
 /// Destructor - deallocate resources and shut down
@@ -245,7 +245,7 @@ bool ADCEngine::setActive(bool bActive) {
         // Start muDMAChannelA
         dma_channel_set_write_addr(muDMAChannelA, cTargetFrame.mpSamples, false);
         dma_channel_set_trans_count(muDMAChannelA, cTargetFrame.muCount, true); 
-        printf("A .mpSamples=0x%08x, .muCount=%d\r\n", cTargetFrame.mpSamples, cTargetFrame.muCount);
+        //printf("A .mpSamples=0x%08x, .muCount=%d\r\n", cTargetFrame.mpSamples, cTargetFrame.muCount);
  
         // And kick off the adc
         adc_run(true);

@@ -24,7 +24,7 @@
 //*****************************************************************************
 // Called every second - updates time, integrated speed and distance
 bool _integrationCallback(repeating_timer_t *pTimer) {
-    printf("_integrationCallback\r\n");
+    //printf("_integrationCallback\r\n");
     SpeedMeasurement *pOwner(static_cast<SpeedMeasurement*>(pTimer->user_data));
     if (nullptr == pOwner) {
         return false;    // fail-out - stops timer...
@@ -62,14 +62,14 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
     // Simple processing - take peak value and make FSD 8kts
     uint8_t *pData(cFrame.mpSamples);
     uint uCount(cFrame.muCount);
-    printf("SpeedMeasurement::process pData=0x%08x, uCount=%d\r\n", pData, uCount);
+    //printf("SpeedMeasurement::process pData=0x%08x, uCount=%d\r\n", pData, uCount);
     uint8_t uMax(0);
     for(uint i=0; i<uCount; i++) {
         uint8_t uValue(*(pData++));
         uMax = (uValue>uMax)?uValue:uMax;
     }
 
-    printf("Process frame uMax = %d\r\n", uMax);
+    //printf("Process frame uMax = %d\r\n", uMax);
     mfCurrentSpeedKts = ((float)uMax / 255.0f) * 8.0f;
 }
 
