@@ -22,6 +22,7 @@
 #include "pico-ssd1306/textRenderer/TextRenderer.h"
 #include "hardware/i2c.h"
 using namespace pico_ssd1306;
+#include "utilities.h"
 
 
 // Includes
@@ -32,6 +33,7 @@ using namespace pico_ssd1306;
 #define kI2C_SCL    (19)
 #define kI2CFreq    (1000000)
 
+volatile uint guOLEDLine = 0;
 
 // Local types
 //*****************************************************************************
@@ -179,7 +181,6 @@ class _TextElement {
 };
 
 #include "VWFonts.h"
-#define _arraysize(a)   (sizeof(a) / sizeof(a[0]))
 static void _split(const std::string &sTag, std::string &sFont, std::string &sX, std::string &sY) {
     sFont = sX = sY = "";
     size_t uFind(sTag.find(","));
@@ -207,28 +208,35 @@ void OLED::show(const std::string &sText) {
     std::list<_TextElement> lPlotList;
     std::string sRemaining(sText);
     int iX(kInvalidCoord), iY(kInvalidCoord);
+    guOLEDLine = __LINE__;
     while(false == sRemaining.empty()) {
-        size_t uFound(sRemaining.find("@("));
-        if (std::string::npos == uFound) {
+        guOLEDLine = __LINE__;
+        size_t uStart(sRemaining.find("@("));
+        if (std::string::npos == uStart) {
             lPlotList.push_back(_TextElement(pFont, sRemaining, iX, iY));
             iX = iY = kInvalidCoord;
             sRemaining.clear();  
+            guOLEDLine = __LINE__;
 
-        } else if (uFound != 0) {
-            std::string sText(sRemaining.substr(0,uFound));
+        } else if (uStart != 0) {
+            std::string sText(sRemaining.substr(0,uStart));
             lPlotList.push_back(_TextElement(pFont, sText, iX, iY));
             iX = iY = kInvalidCoord;
-            sRemaining = sRemaining.substr(uFound);
+            sRemaining = sRemaining.substr(uStart);
+            guOLEDLine = __LINE__;
 
         } else {
             // Extract the tag
-            size_t uTagEnd(sRemaining.find(")", uFound+2));
+            size_t uTagEnd(sRemaining.find(")", uStart+2));
             if (std::string::npos == uTagEnd) {
                 printf("Badly formed tag at %s\r\n", sRemaining.c_str());
                 sRemaining.clear();
+                guOLEDLine = __LINE__;
+
             } else {   
-                std::string sTag(sRemaining.substr(uFound+2, uTagEnd-(uFound+2)));
+                std::string sTag(sRemaining.substr(uStart+2, uTagEnd-(uStart+2)));
                 sRemaining = sRemaining.substr(uTagEnd+1);
+                guOLEDLine = __LINE__;
 
                 // Interpret tag (font,x,y)
                 std::string sFont, sX, sY;
@@ -244,30 +252,29 @@ void OLED::show(const std::string &sText) {
                 if (false == sY.empty()) {
                     iY = atoi(sY.c_str());
                 }
+                guOLEDLine = __LINE__;
             }
         }
     }
+    guOLEDLine = __LINE__;
 
     mpDisplay->clear();
     int iPlotX(0), iPlotY(0);
+        guOLEDLine = __LINE__;
     for(std::list<_TextElement>::const_iterator cIter = lPlotList.begin(); cIter != lPlotList.end(); ++cIter) {
-        const _TextElement &cE(*cIter);
+         guOLEDLine = __LINE__;
+       const _TextElement &cE(*cIter);
         iPlotX = (cE.miX != kInvalidCoord)?cE.miX:iX;
         iPlotY = (cE.miY != kInvalidCoord)?cE.miY:iY;
+        guOLEDLine = __LINE__;
         _renderVWText(mpDisplay, cE.msText.c_str(), (const uint8_t *)cE.mpFont, iPlotX, iPlotY);
-    }
+         guOLEDLine = __LINE__;
+   }
+        guOLEDLine = __LINE__;
     mpDisplay->sendBuffer();
-}
-
-void OLED::clear(void) {
-    printf("OLED clear\r\n");
+        guOLEDLine = __LINE__;
 }
 
 void OLED::setContrast(uint8_t uContrast) {
     mpDisplay->setContrast(uContrast);
-}
-
-
-void OLED::scrollOut(bool bLeftNotRight) {
-    printf((true == bLeftNotRight)?"Scroll out left\r\n":"Scroll out right\r\n");
 }

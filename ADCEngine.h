@@ -132,7 +132,7 @@ class ADCEngine {
 
         /// Attach a consumer to process the next frame. If no frame is available,
         /// returns 'false' and cConsumer::process will not be called.
-        bool processFrame(Consumer &cConsumer);
+        bool processFrame(Consumer *pConsumer);
 };
 
 #endif // _ADCENGINE_

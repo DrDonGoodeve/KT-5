@@ -21,6 +21,8 @@
 #include "utilities.h"
 #include <cstdio>
 
+volatile uint guADCLine = 0;
+
 // Defines
 //*****************************************************************************
 #define kK                  (1024)
@@ -36,45 +38,55 @@
 static int siIRQCounter = 0;
 void _dmaIRQHandler(void) {
     ADCEngine *pOwner(ADCEngine::mspSelf);
+    if (nullptr == pOwner) {
+        return; // Should never happen
+    }
 
+guADCLine = __LINE__;
     // Test for valid DMA interrupt
     uint uDMAChannel(pOwner->muDMAChannelA);
     if (false == dma_channel_get_irq0_status(uDMAChannel)) {
         return; // Spurious interrupt...
     }
-
-    // Clear the interrupt for uIdleDMAChannel
-    dma_hw->ints0 = 0x1 << uDMAChannel;
-    //printf("%d: Completed DMA 0x%08x\r\n", siIRQCounter++, pOwner->mcDMAFrame.mpSamples);
-
+guADCLine = __LINE__;
     // Pull from mlDMAList and place in signal list
     pOwner->mlSignalBuffer.push_back(pOwner->mcDMAFrame);
+guADCLine = __LINE__;
     pOwner->mcDMAFrame.clear();
-
+guADCLine = __LINE__;
     // Find the next target buffer - from free list, or overwrite oldest in
     // signal if there are none left (consumer not keeping up...)
+guADCLine = __LINE__;
     ADCEngine::Frame cFreshFrame;
-    if (false == pOwner->mlFreeList.empty()) {
-        cFreshFrame = pOwner->mlFreeList.front();
-        pOwner->mlFreeList.pop_front();
-    } else if (false == pOwner->mlSignalBuffer.empty()) {
-        cFreshFrame = pOwner->mlSignalBuffer.front(); // Oldest signal discarded
-        pOwner->mlSignalBuffer.pop_front();
+    {   ScopedLock cLock(&(pOwner->mcStoreLock));
+        if (false == pOwner->mlFreeList.empty()) {
+    guADCLine = __LINE__;
+            cFreshFrame = pOwner->mlFreeList.front();
+            pOwner->mlFreeList.pop_front();
+        } else if (false == pOwner->mlSignalBuffer.empty()) {
+    guADCLine = __LINE__;
+            cFreshFrame = pOwner->mlSignalBuffer.front(); // Oldest signal discarded
+            pOwner->mlSignalBuffer.pop_front();
+        }
+        if (true == cFreshFrame.isEmpty()) {
+    guADCLine = __LINE__;
+            return; // Should be impossible - protect from using stupid values below...
+        }
+        pOwner->mcDMAFrame = cFreshFrame;
     }
-    if (true == cFreshFrame.isEmpty()) {
-        return; // Should be impossible - protect from using stupid values below...
-    }
-    //printf("!");
 
     // Set up for next transfer - and start
+guADCLine = __LINE__;
     cFreshFrame.muSequence = pOwner->muSequence++;	// Set next sequence number
-    pOwner->mcDMAFrame = cFreshFrame;
 
+guADCLine = __LINE__;
     dma_channel_set_write_addr(uDMAChannel, cFreshFrame.mpSamples, false);
     dma_channel_set_trans_count(uDMAChannel, cFreshFrame.muCount, true); 
-    //printf("Next DMA 0x%08x\r\n", pOwner->mcDMAFrame.mpSamples);
-}
+guADCLine = __LINE__;
 
+    // Clear the interrupt
+    dma_hw->ints0 = 0x1 << uDMAChannel;
+}
 
 static void _configureDMAChannel(uint uChannel, uint8_t *pTarget, uint uTargetSize) {
      // Grab and manipulate default configuration
@@ -169,7 +181,6 @@ ADCEngine::ADCEngine(
 
     // So far, so good
     mbIsValid = true;
-    //printf("ADC init success\r\n");
 }
 
 /// Destructor - deallocate resources and shut down
@@ -226,16 +237,14 @@ bool ADCEngine::setActive(bool bActive) {
         muSequence = 0; // Starting again...
                
         // Setup initial transfer target
-        Frame cTargetFrame;
         {   ScopedLock cLock(&mcStoreLock);
-            cTargetFrame = mlFreeList.front();
-            cTargetFrame.muSequence = muSequence++;
+            mcDMAFrame = mlFreeList.front();
             mlFreeList.pop_front();
-            mcDMAFrame = cTargetFrame;
+            mcDMAFrame.muSequence = muSequence++;
         }
 
         // Configure DMA channel
-        _configureDMAChannel(muDMAChannelA, cTargetFrame.mpSamples, cTargetFrame.muCount);
+        _configureDMAChannel(muDMAChannelA, mcDMAFrame.mpSamples, mcDMAFrame.muCount);
     
         // Configure interrupts
         dma_channel_set_irq0_enabled(muDMAChannelA, true);
@@ -243,10 +252,9 @@ bool ADCEngine::setActive(bool bActive) {
         irq_set_enabled(DMA_IRQ_0, true);
 
         // Start muDMAChannelA
-        dma_channel_set_write_addr(muDMAChannelA, cTargetFrame.mpSamples, false);
-        dma_channel_set_trans_count(muDMAChannelA, cTargetFrame.muCount, true); 
-        //printf("A .mpSamples=0x%08x, .muCount=%d\r\n", cTargetFrame.mpSamples, cTargetFrame.muCount);
- 
+        dma_channel_set_write_addr(muDMAChannelA, mcDMAFrame.mpSamples, false);
+        dma_channel_set_trans_count(muDMAChannelA, mcDMAFrame.muCount, true); 
+    
         // And kick off the adc
         adc_run(true);
 
@@ -267,7 +275,11 @@ bool ADCEngine::setActive(bool bActive) {
 
 /// Attach a consumer to process the next frame. If no frame is available,
 /// returns 'false' and cConsumer::process will not be called.
-bool ADCEngine::processFrame(Consumer &cConsumer) {
+bool ADCEngine::processFrame(Consumer *pConsumer) {
+    if (nullptr == pConsumer) {
+        return false;
+    }
+
     Frame cFrame;   // Grab signal frame to process
     {   ScopedLock cLock(&mcStoreLock);
         if (false == mlSignalBuffer.empty()) {
@@ -281,7 +293,7 @@ bool ADCEngine::processFrame(Consumer &cConsumer) {
 
     // Consumer now has exclusive access to frame
     //printf("Calling Consumer.process\r\n");
-    cConsumer.process(cFrame);
+    pConsumer->process(cFrame);
 
     // Release consumed frame
     {   ScopedLock cLock(&mcStoreLock);
