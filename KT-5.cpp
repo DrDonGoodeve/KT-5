@@ -34,7 +34,7 @@
 //*****************************************************************************
 #define kDialServoGPIO          (14)   ///< Dial servo is on GPIO14 (pin 19)
 #define kAppInfo1               "@(4,16,-6)KT-5" 
-#define kAppInfo2               "@(2,%d,32)reloaded"
+#define kAppInfo2               "@(2,%d,32)reloaded..."
 #define kADCChannel             (0)
 #define kSampleRateHz           (10.0e3f)
 #define kADCBuffer              (500.0e-3f)
@@ -119,6 +119,7 @@ typedef enum {
     kNoOp,           // Null operation
     kIgnore,         // Ignore the command
     kHelp,           // Help command
+    kDiag,
     kInput,          // Report raw input
     kReportKts,     // <kts> report input mapped to kts
     kSetKtsVal,     // <kts> <input> set kts map to input
@@ -138,6 +139,7 @@ static const struct {
     const char *pInfo;
 }spCommands[] = {
     {"?", kHelp, 0, "- show help and diagnostics"},
+    {"d", kDiag, 0, "- display diagnostic information"},
     {"raw", kInput, 0, "- display current raw transducer signal"},
     {"kts", kReportKts, 0, "- show mappings of kts to raw transducer signal"},
     {"setkts", kSetKtsVal, 2, "<kts> <raw> - set mapping from raw value to kts"},
@@ -162,18 +164,17 @@ class _Command {
 
         _Command(const std::string &sInput) :
             muOpCode(kNoOp), muData1(0x0), muData2(0x0) {
-            
-            printf("KT5:%d, OLED:%d, ADC:%d\r\n", guKT5Line, guOLEDLine, guADCLine);
 
-            /* temporary disable
             std::string sTag(sInput);
             size_t iSpace(sInput.find(" "));
+            int iArgs(0);
             if (iSpace != std::string::npos) {
                 sTag = sInput.substr(0, iSpace);
                 std::string sArgs(sInput.substr(iSpace+1));
                 iSpace = sArgs.find(" ");
                 if (std::string::npos == iSpace) {
                     muData1 = stoi(sArgs);
+                    iArgs = 1;
                     //printf("sArg1 = %s\r\n", sArgs.c_str());
                 } else {
                     std::string sArg1(sArgs.substr(0, iSpace));
@@ -181,6 +182,7 @@ class _Command {
                     //printf("sArg1 = %s, sArg2 = %s\r\n", sArg1.c_str(), sArg2.c_str());
                     muData1 = stoi(sArg1);
                     muData2 = stoi(sArg2);
+                    iArgs = 2;
                 }
             }
 
@@ -188,23 +190,35 @@ class _Command {
             for(uint i=0; i<_arraysize(spCommands); i++) {
                 if (0 == sTag.compare(spCommands[i].pTag)) {
                     muOpCode = spCommands[i].eCode;
+                    if (iArgs != spCommands[i].uArgs) {
+                        printf("error: command '%s' takes %d arguments:\r\n\t%s\r\n", spCommands[i].pTag, spCommands[i].uArgs, spCommands[i].pInfo);
+                        muOpCode = kIgnore;
+                    }
                     break;
                 }
             }
-            if (kHelp == muOpCode) {  // Help command
-                muOpCode = kIgnore; // Always runs on core1 - aid with debugging
-                std::string sHelp("command:\r\n");
-                for(uint i=0; i<_arraysize(spCommands); i++) {
-                    sHelp += std::string("\t") + std::string(spCommands[i].pTag) + std::string(" ") + std::string(spCommands[i].pInfo) + std::string("\r\n");
-                }
-                printf(sHelp.c_str());
-                printf("KT5:%d, OLED:%d, ADC:%d\r\n", guKT5Line, guOLEDLine, guADCLine);
-            } else if (kRestart == muOpCode) {
-                muOpCode = kIgnore;
-                printf("Restarting...");
-                // add restert code here
+            switch(muOpCode) {
+                case kHelp:
+                    muOpCode = kIgnore; // Always runs on core1 - aid with debugging
+                    printf("commands:\r\n");
+                    for(uint i=0; i<_arraysize(spCommands); i++) {
+                        printf("\t%s %s\r\n", spCommands[i].pTag, spCommands[i].pInfo);
+                    }
+                    break;
+
+                case kRestart:
+                    muOpCode = kIgnore;
+                    printf("Restarting...");
+                    break;
+
+                case kDiag:
+                    muOpCode = kIgnore;
+                    printf("KT5:%d, OLED:%d, ADC:%d\r\n", guKT5Line, guOLEDLine, guADCLine);
+                    break;
+
+                default:
+                    break;
             }
-            */
         }
 
         _Command(uint32_t uCode) :
@@ -219,7 +233,7 @@ class _Command {
         }
 
         bool canSend(void) {
-            return ((muOpCode != kNoOp) && (muOpCode != kIgnore) && (muOpCode != kHelp) && (muOpCode != kRestart));
+            return ((muOpCode != kNoOp) && (muOpCode != kIgnore));
         }
 
         uint32_t getAs32Bit(void) {
@@ -229,7 +243,7 @@ class _Command {
 
 // Blocking loop - launch on core 1
 void _commandProcessor(void) {
-    printf("Waiting for command...\r\n");
+    printf("KT-5 Running\r\n(waiting for command...)\r\n");
     
     while(true) {
         std::string sInput;
@@ -269,7 +283,8 @@ int main(void) {
     // Setup connection to HC-05
     HC05 *pBluetooth(new HC05("KT-5"));
 
-    for(uint i=128; i>6; i--) {
+   guKT5Line = __LINE__;
+   for(uint i=128; i>2; i--) {
         char pBuffer[64];
         sprintf(pBuffer, kAppInfo1 kAppInfo2, i);
         pDisplay->show(pBuffer);
@@ -277,6 +292,7 @@ int main(void) {
     }
 
     // Create dial servo object and zero position
+    guKT5Line = __LINE__;
     Servo *pDial(new Servo(kDialServoGPIO, 0.0f, false));
     pDial->setPosition(1.0f);
     sleep_ms(500);
@@ -284,37 +300,31 @@ int main(void) {
     sleep_ms(2000);
 
     // Alive LED
+    guKT5Line = __LINE__;
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
     gpio_put(PICO_DEFAULT_LED_PIN, 0);
     bool bAliveLEDOn(false);
 
-    // 10 second warning to get UART connection (testing)
-    for(uint i=0; i<10; i++) {
-        gpio_put(PICO_DEFAULT_LED_PIN, 1);
-        sleep_ms(20);
-        gpio_put(PICO_DEFAULT_LED_PIN, 0);
-        sleep_ms(980);
-    }
+    // Launch command processor on core1
+    guKT5Line = __LINE__;
+    multicore_launch_core1(_commandProcessor);
 
     // Create measurement object
+    guKT5Line = __LINE__;
     SpeedMeasurement *pMeasure(new SpeedMeasurement(kSampleRateHz));
 
     // Create ADCEngine and start sampling
+    guKT5Line = __LINE__;
     ADCEngine *pADC(new ADCEngine(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames));
+    guKT5Line = __LINE__;
     pADC->setActive(true);
 
     // Setup display update rollover timer
     add_repeating_timer_ms(kDisplayUpdateTimerPeriod, _displayUpdateCallback, nullptr, &mcDisplayTimer);
 
-    // Announce application and start command processor
-    printf("KT-5 Application\r\n");
-    multicore_launch_core1(_commandProcessor);
-
-#define _FULLAPP
-#ifdef _FULLAPP
-
     // Main loop
+    bool bServoAuto(true);
     while(true) {
 guKT5Line = __LINE__;
         while(false == sbDisplayUpdateDue) {
@@ -323,9 +333,11 @@ guKT5Line = __LINE__;
                 //printf(".");
                 sleep_ms(kProcessingPause);
             } else {
-                // Update dial every time a new measurement is made...
-                float fKts(pMeasure->getSpeedKts());
-                pDial->setPosition(_getServoPosnForKts(fKts));               
+                if (true == bServoAuto) {
+                    // Update dial every time a new measurement is made...
+                    float fKts(pMeasure->getSpeedKts());
+                    pDial->setPosition(_getServoPosnForKts(fKts));
+                }        
             }
 guKT5Line = __LINE__;
         }
@@ -340,7 +352,18 @@ guKT5Line = __LINE__;
 guKT5Line = __LINE__;
         _Command cCommand;
         if (true == _getCommand(cCommand)) {
-            //printf("Command %d, a1:%d, a2:%d\r\n", cCommand.muOpCode, cCommand.muData1, cCommand.muData2);
+            printf("Command %d, a1:%d, a2:%d\r\n", cCommand.muOpCode, cCommand.muData1, cCommand.muData2);
+            switch(cCommand.muOpCode) {
+                case kServoOn: bServoAuto = true; break;
+                case kServoOff: bServoAuto = false; break;
+                case kServoPos: {
+                    float fPosn((float)cCommand.muData1 / 255.0f);
+                    pDial->setPosition(fPosn);
+                    break;
+                }
+                default:
+                    break;
+            }
         }
 
         // Update the display
@@ -353,7 +376,7 @@ guKT5Line = __LINE__;
                 break;
             }
             case kDisplayTime: {
-               uint uSec((uint)roundf(pMeasure->getSecondsElapsed()));
+                uint uSec((uint)roundf(pMeasure->getSecondsElapsed()));
                 uint uHrs(uSec / 3600); uSec -= (uHrs*3600);
                 uint uMin(uSec / 60); uSec -= (uMin*60);
                 sprintf(pBuffer, "@(3,0,-4)%02d:%02d:%02d@(2,10,34)ELAPSED", uHrs, uMin, uSec);
@@ -378,41 +401,3 @@ guKT5Line = __LINE__;
 guKT5Line = __LINE__;
     }
 }
-
-#else // _FULLAPP
-    //  Show we are alive by driving the PICO LED output
-    // Forever...
-    char pBuffer[32];
-    uint uStep(0);
-    while (true) {
-        cDial.setPosition(_getServoPosnForKts(0.0f));
-        sleep_ms(500);
-        for(uint uKts=0; uKts<8; uKts++) {
-            for(uint uFrac=0; uFrac<=100; uFrac++) {
-                float fKts((float)uKts + ((float)uFrac / 100.0f));
-                cDial.setPosition(_getServoPosnForKts(fKts));
-                sleep_ms(1);
-                if (0 == (uFrac % 10)) {
-                    switch (uStep) {
-                        //sprintf(pBuffer, "@(4,12,-6)%.1fkts", fKts);
-                        case 0: sprintf(pBuffer, "@(4,40,-6)%.1f@(2,10,34)K N O T S", fKts); break;
-                        case 1: sprintf(pBuffer, "@(4,30,-6)%.2f@(2,20,34)SEA nm", fKts); break;
-                        case 2: sprintf(pBuffer, "@(3,0,-4)%02d:%02d:%02d@(2,10,34)ELAPSED", (int)(fKts*10.0f), (int)(fKts*10.0f), (int)(fKts*10.0f)); break;
-                        case 3: default: sprintf(pBuffer, "@(4,16,-6)%.3f@(2,20,34)avg KTS", fKts); break;
-                    }
-                    cDisplay.show(pBuffer);
-                }
-            }
-            gpio_put(PICO_DEFAULT_LED_PIN, 1);
-            sleep_ms(80);
-            gpio_put(PICO_DEFAULT_LED_PIN, 0);
-            sleep_ms(100);
-            gpio_put(PICO_DEFAULT_LED_PIN, 1);
-            sleep_ms(80);
-            gpio_put(PICO_DEFAULT_LED_PIN, 0);
-            sleep_ms(1000);        
-        }
-        uStep = ((uStep+1)%4);
-    }
-}
-#endif // _FULLAPP

@@ -41,47 +41,55 @@ void _dmaIRQHandler(void) {
     if (nullptr == pOwner) {
         return; // Should never happen
     }
+    if (nullptr == pOwner->mpDMAFrame) {
+        return; // Also should never happen...
+    }
 
 guADCLine = __LINE__;
     // Test for valid DMA interrupt
-    uint uDMAChannel(pOwner->muDMAChannelA);
+    uint uDMAChannel(pOwner->muDMAChannel);
     if (false == dma_channel_get_irq0_status(uDMAChannel)) {
         return; // Spurious interrupt...
     }
-guADCLine = __LINE__;
-    // Pull from mlDMAList and place in signal list
-    pOwner->mlSignalBuffer.push_back(pOwner->mcDMAFrame);
-guADCLine = __LINE__;
-    pOwner->mcDMAFrame.clear();
-guADCLine = __LINE__;
-    // Find the next target buffer - from free list, or overwrite oldest in
-    // signal if there are none left (consumer not keeping up...)
-guADCLine = __LINE__;
-    ADCEngine::Frame cFreshFrame;
-    {   ScopedLock cLock(&(pOwner->mcStoreLock));
-        if (false == pOwner->mlFreeList.empty()) {
-    guADCLine = __LINE__;
-            cFreshFrame = pOwner->mlFreeList.front();
-            pOwner->mlFreeList.pop_front();
-        } else if (false == pOwner->mlSignalBuffer.empty()) {
-    guADCLine = __LINE__;
-            cFreshFrame = pOwner->mlSignalBuffer.front(); // Oldest signal discarded
-            pOwner->mlSignalBuffer.pop_front();
+
+    // Place just completed DMA frame on to end of signal list
+    guADCLine = __LINE__; 
+    pOwner->mpDMAFrame->mpNext = nullptr;
+    if (nullptr == pOwner->mpSignalListHead) {
+        pOwner->mpSignalListHead = pOwner->mpSignalListTail = pOwner->mpDMAFrame;
+    } else {
+        pOwner->mpSignalListTail->mpNext = pOwner->mpDMAFrame;
+        pOwner->mpSignalListTail = pOwner->mpDMAFrame;
+    }
+    pOwner->mpDMAFrame = nullptr;   // Clear the target frame
+
+    // Find the next target frame - from free list, or overwrite oldest in
+    // signal list if there are none left (consumer not keeping up...)
+    if (pOwner->mpFreeListHead != nullptr) {
+        pOwner->mpDMAFrame = pOwner->mpFreeListHead;
+        pOwner->mpFreeListHead = pOwner->mpDMAFrame->mpNext;
+        pOwner->mpDMAFrame->mpNext = nullptr;
+
+    } else if (pOwner->mpSignalListHead != nullptr) {
+        pOwner->mpDMAFrame = pOwner->mpSignalListHead;
+        pOwner->mpSignalListHead = pOwner->mpDMAFrame->mpNext;
+        pOwner->mpDMAFrame->mpNext = nullptr;
+        if (nullptr == pOwner->mpSignalListHead) {
+            pOwner->mpSignalListTail = nullptr;
         }
-        if (true == cFreshFrame.isEmpty()) {
-    guADCLine = __LINE__;
-            return; // Should be impossible - protect from using stupid values below...
-        }
-        pOwner->mcDMAFrame = cFreshFrame;
+    }
+
+    if (nullptr == pOwner->mpDMAFrame) {
+        return; // Should be impossible - protect from stupid values below
     }
 
     // Set up for next transfer - and start
 guADCLine = __LINE__;
-    cFreshFrame.muSequence = pOwner->muSequence++;	// Set next sequence number
+    pOwner->mpDMAFrame->muSequence = pOwner->muSequence++;	// Set next sequence number
 
 guADCLine = __LINE__;
-    dma_channel_set_write_addr(uDMAChannel, cFreshFrame.mpSamples, false);
-    dma_channel_set_trans_count(uDMAChannel, cFreshFrame.muCount, true); 
+    dma_channel_set_write_addr(uDMAChannel, pOwner->mpDMAFrame->mpSamples, false);
+    dma_channel_set_trans_count(uDMAChannel, pOwner->mpDMAFrame->muCount, true); 
 guADCLine = __LINE__;
 
     // Clear the interrupt
@@ -123,39 +131,43 @@ ADCEngine *ADCEngine::mspSelf = nullptr; // Singleton pointer declaration
 ADCEngine::ADCEngine(
     uint uADCChannel, float fSampleRateHz,
     float fBufferTimeSec, uint uFrames) :
+    mpSignalListHead(nullptr), mpSignalListTail(nullptr),
+    mpFreeListHead(nullptr), mpDMAFrame(nullptr),
     mbIsValid(false), mbIsRunning(false) {
-
+ guADCLine = __LINE__;
     // Singleton protection and self-pointer (static)
     if (mspSelf != nullptr) {
         return;
     }
     mspSelf = this;
-
+ guADCLine = __LINE__;
     // Pull sample rate into range if needed and compute clock divisor
     fSampleRateHz = (fSampleRateHz < kMinSampleRate)?kMinSampleRate:((fSampleRateHz > kMaxSampleRate)?kMaxSampleRate:fSampleRateHz);
     muClockDivisor = (uint)roundf(kADCClock / fSampleRateHz);
     mfSampleRateHz = kADCClock / (float)muClockDivisor;
     //printf("Sample Rate Hz = %.0f, muClockDivisor=%d\r\n", mfSampleRateHz, muClockDivisor);
-
+ guADCLine = __LINE__;
     // Compute buffer dimensions (note that a sample is 8-bits - ie. a byte)
     uint uSamples((uint)roundf(fBufferTimeSec * fSampleRateHz));
     uSamples = (uSamples > kMaxBytes)?kMaxBytes:uSamples;
     uint uFrameSize(uSamples / uFrames);
     uSamples = uFrameSize * uFrames;  // Make all equal size and correct overall size (down)
-    mpBuffer = new uint8_t[uSamples];
-    if (nullptr == mpBuffer) {
-        mspSelf = nullptr;
-        return;
-    }
-    //printf("uSamples = %d, uFrameSize = %d\r\n", uSamples, uFrameSize);
-    //printf("Frame time = %.0f msec\r\n", ((float)uFrameSize / mfSampleRateHz) * 1000.0f);
 
+    //printf("uSamples = %d, uFrameSize = %d, uFrames = %d\r\n", uSamples, uFrameSize, uFrames);
+    //printf("Frame time = %.0f msec\r\n", ((float)uFrameSize / mfSampleRateHz) * 1000.0f);
+ guADCLine = __LINE__;
     // Setup free list - signal list is empty
-    for(uint i=0; i<uFrames; i++) {
-        Frame cFrame(mpBuffer + (i*uFrameSize), uFrameSize);
-        mlFreeList.push_back(cFrame);
+ guADCLine = __LINE__;
+   for(uint i=0; i<uFrames; i++) {
+       //printf("allocating frame %d\r\n", i);
+ guADCLine = __LINE__;
+        Frame *pNewFrame(new Frame(uFrameSize));
+ guADCLine = __LINE__;
+        pNewFrame->mpNext = mpFreeListHead;
+        mpFreeListHead = pNewFrame;
+guADCLine = __LINE__;
     }
-    //printf("Freelist contains %d frames\r\n", mlFreeList.size());
+ guADCLine = __LINE__;
 
     // Initialize critical section
     critical_section_init(&mcStoreLock);
@@ -177,7 +189,7 @@ ADCEngine::ADCEngine(
     //printf("uADCChannel = %d, muClockDivisor=%d\r\n", uADCChannel, muClockDivisor);
 
     // Claim DMA resources (panic and fail if not available)
-    muDMAChannelA = dma_claim_unused_channel(true);
+    muDMAChannel = dma_claim_unused_channel(true);
 
     // So far, so good
     mbIsValid = true;
@@ -194,9 +206,21 @@ ADCEngine::~ADCEngine() {
     
     // Free all memory resources
     {   ScopedLock cLock(&mcStoreLock);
-        mlSignalBuffer.clear();
-        mlFreeList.clear();
-        delete []mpBuffer;
+        Frame *pFrame(mpSignalListHead);
+        while(pFrame != nullptr) {
+            Frame *pLast(pFrame);
+            pFrame = pFrame->mpNext;
+            delete pLast;
+        }
+        mpSignalListHead = mpSignalListTail = nullptr;
+
+        pFrame = mpFreeListHead;
+        while(pFrame != nullptr) {
+            Frame *pLast(pFrame);
+            pFrame = pFrame->mpNext;
+            delete pLast;
+        }
+        mpFreeListHead = nullptr;
     }
 
     // De-initialize critical section
@@ -226,36 +250,47 @@ bool ADCEngine::setActive(bool bActive) {
         return true;
     }
 
-    if (true == bActive) {
+guADCLine = __LINE__;
+   if (true == bActive) {
         // Discard all signal buffers back into free list
+guADCLine = __LINE__;
         {   ScopedLock cLock(&mcStoreLock);
-            while(false == mlSignalBuffer.empty()) {
-                mlFreeList.push_back(mlSignalBuffer.front());
-                mlSignalBuffer.pop_front();
+            Frame *pFrame(mpSignalListHead);
+            while(pFrame != nullptr) {
+                Frame *pNext(pFrame->mpNext);
+                pFrame->mpNext = mpFreeListHead;
+                mpFreeListHead = pFrame;
             }
+            mpSignalListHead = mpSignalListTail = nullptr;
         }
         muSequence = 0; // Starting again...
+guADCLine = __LINE__;
                
         // Setup initial transfer target
         {   ScopedLock cLock(&mcStoreLock);
-            mcDMAFrame = mlFreeList.front();
-            mlFreeList.pop_front();
-            mcDMAFrame.muSequence = muSequence++;
+            mpDMAFrame = mpFreeListHead;
+            mpFreeListHead = mpDMAFrame->mpNext;
+            mpDMAFrame->mpNext = nullptr;
+            mpDMAFrame->muSequence = muSequence++;
         }
+guADCLine = __LINE__;
 
         // Configure DMA channel
-        _configureDMAChannel(muDMAChannelA, mcDMAFrame.mpSamples, mcDMAFrame.muCount);
+        _configureDMAChannel(muDMAChannel, mpDMAFrame->mpSamples, mpDMAFrame->muCount);
     
         // Configure interrupts
-        dma_channel_set_irq0_enabled(muDMAChannelA, true);
+guADCLine = __LINE__;
+        dma_channel_set_irq0_enabled(muDMAChannel, true);
         irq_set_exclusive_handler(DMA_IRQ_0, _dmaIRQHandler);
         irq_set_enabled(DMA_IRQ_0, true);
 
-        // Start muDMAChannelA
-        dma_channel_set_write_addr(muDMAChannelA, mcDMAFrame.mpSamples, false);
-        dma_channel_set_trans_count(muDMAChannelA, mcDMAFrame.muCount, true); 
+        // Start muDMAChannel
+ guADCLine = __LINE__;
+        dma_channel_set_write_addr(muDMAChannel, mpDMAFrame->mpSamples, false);
+        dma_channel_set_trans_count(muDMAChannel, mpDMAFrame->muCount, true); 
     
         // And kick off the adc
+ guADCLine = __LINE__;
         adc_run(true);
 
         mbIsRunning = true;
@@ -264,9 +299,9 @@ bool ADCEngine::setActive(bool bActive) {
     } else {
         // Stop everything - switch off and disable interrupts
         adc_run(false);
-        dma_channel_abort(muDMAChannelA);
+        dma_channel_abort(muDMAChannel);
         irq_set_enabled(DMA_IRQ_0, false);
-        dma_channel_set_irq0_enabled(muDMAChannelA, false);
+        dma_channel_set_irq0_enabled(muDMAChannel, false);
 
         mbIsRunning = false;
         return true;
@@ -279,25 +314,29 @@ bool ADCEngine::processFrame(Consumer *pConsumer) {
     if (nullptr == pConsumer) {
         return false;
     }
-
-    Frame cFrame;   // Grab signal frame to process
+    
+    Frame *pFrame(nullptr);   // Grab signal frame to process
     {   ScopedLock cLock(&mcStoreLock);
-        if (false == mlSignalBuffer.empty()) {
-            cFrame = mlSignalBuffer.front();
-            mlSignalBuffer.pop_front();
+        if (mpSignalListHead != nullptr) {
+            pFrame = mpSignalListHead;
+            mpSignalListHead = mpSignalListHead->mpNext;
+            if (nullptr == mpSignalListHead) {
+                mpSignalListTail = nullptr;
+            }
         }
     }
-    if (true == cFrame.isEmpty()) {
+    if (nullptr == pFrame) {
         return false;
     }
 
     // Consumer now has exclusive access to frame
     //printf("Calling Consumer.process\r\n");
-    pConsumer->process(cFrame);
+    pConsumer->process(*pFrame);
 
-    // Release consumed frame
+    // Release consumed frame into free list
     {   ScopedLock cLock(&mcStoreLock);
-        mlFreeList.push_front(cFrame);
+        pFrame->mpNext = mpFreeListHead;
+        mpFreeListHead = pFrame;
     }
 
     return true;

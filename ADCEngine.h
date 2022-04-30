@@ -35,41 +35,24 @@
 //-----------------------------------------------------------------------------
 class ADCEngine {
     public:
+        // Simple transparent data class
          class Frame {
             public:
                 uint muSequence;    // Out-of-sequence implies discontinuity... 
                 uint8_t *mpSamples; // Data
-                uint muCount;       // Number of samples in data
+                uint muCount;       // Number of elements in mpSamples
+                Frame *mpNext;      // Next frame in this list/stack
 
                 Frame(void) :
-                    muSequence(0), mpSamples(nullptr), muCount(0) {      
+                    muSequence(0), mpSamples(nullptr), muCount(0), mpNext(nullptr) {      
                 }
 
-                Frame(uint8_t *pSamples, uint uCount) : 
-                    muSequence(0), mpSamples(pSamples), muCount(uCount) {
+                Frame(uint uCount) : 
+                    muSequence(0), mpSamples(new uint8_t[uCount]), muCount(uCount), mpNext(nullptr) {
                 }
 
-                void clear(void) {
-                    muSequence = 0;
-                    mpSamples = nullptr;
-                    muCount = 0;
-                }
-
-                bool isEmpty(void) const {
-                    return (nullptr == mpSamples);
-                }
-
-                Frame &operator=(const Frame &cOther) {
-                    muSequence = cOther.muSequence;
-                    mpSamples = cOther.mpSamples;
-                    muCount = cOther.muCount;
-                    return *this;
-                }
-
-                bool operator==(const Frame &cOther) const {
-                    return ((muSequence == cOther.muSequence) &&
-                            (mpSamples == cOther.mpSamples) &&
-                            (muCount == cOther.muCount));
+                ~Frame() {
+                    delete []mpSamples;
                 }
         };       
         
@@ -88,16 +71,17 @@ class ADCEngine {
         bool mbIsRunning;           // true if DMA/ADC currently running
         float mfSampleRateHz;       // Actual sample rate achieved
         uint muClockDivisor;        // Clock divisor to proce requested sample rate
-        uint muDMAChannelA;         // Uses two DMA channels (chained)
+        uint muDMAChannel;          // DMA channel
         Consumer *mpLastConsumer;   // Last attached consumer object
         uint muSequence;            // Sequence number
-
-        uint8_t *mpBuffer;          // Buffer from which mlSignalList, mlFreeList frames come...
         
-        critical_section_t mcStoreLock;    // IRQ and multicore safe mutex
-        std::list<Frame> mlSignalBuffer;   // Allocated data in signal sequence order
-        std::list<Frame> mlFreeList;       // Available blocks in arbitrary order
-        Frame mcDMAFrame;                  // Current DMA target frame
+        // The following are explicitly managed via pointers to avoid causing
+        // issues due to heap management routines not being interrupt-safe.
+        critical_section_t mcStoreLock;  // IRQ and multicore safe mutex
+        Frame *mpSignalListHead;         // Head of signal list (FIFO)
+        Frame *mpSignalListTail;         // Tail of signal list
+        Frame *mpFreeListHead;           // Head of free list (LIFO)
+        Frame *mpDMAFrame;               // Current DMA target frame
 
         friend void _dmaIRQHandler(void);  // Has access to this class
         static ADCEngine *mspSelf;         // Singleton pointer
