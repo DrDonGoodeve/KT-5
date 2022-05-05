@@ -43,6 +43,8 @@
 #define kDisplayUpdatePeriod        (2000)
 #define kDisplayUpdateTimerPeriod   (200)
 
+#define kKtsPositions   (8)
+
 
 // Local types
 //*****************************************************************************
@@ -69,6 +71,16 @@ repeating_timer_t mcDisplayTimer;
 
 // Local functions, classes
 //*****************************************************************************
+// Settings - stored in flash
+// Examines flash for valid settings signature. If found - loads the settings.
+// supports restore and save operations.
+//-----------------------------------------------------------------------------
+class Settings {
+    public:
+        uint8_t mpServoKts[kKtsPositions];      // Map integer kts to servo position
+        uint8_t mpKtsForReading[kKtsPositions]; // Map reading to kts
+};
+
 // The servo is not centered on the dial - and hence to get the digits lining
 // up correctly a correction needs to be applied. This function maps a speed
 // in Knots to the correct servo position control (where 0.0f corresponds to
@@ -115,6 +127,7 @@ guKT5Line = __LINE__;
 // Waits (blocking) on stdin. On receipt of a command attempts to interpret it. If
 // successfully interpreted, encodes as a _Command which can be picked up
 // (non-blocking) by the main loop via _getCommand.
+//-----------------------------------------------------------------------------
 typedef enum {
     kNoOp,           // Null operation
     kIgnore,         // Ignore the command
@@ -281,7 +294,7 @@ int main(void) {
     sleep_ms(500);
 
     // Setup connection to HC-05
-    HC05 *pBluetooth(new HC05("KT-5"));
+    HC05 *pBluetooth(new HC05());
 
    guKT5Line = __LINE__;
    for(uint i=128; i>2; i--) {

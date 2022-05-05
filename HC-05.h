@@ -31,11 +31,8 @@ class HC05 {
     private:
 
     public:
-        HC05(const char *pID);
+        HC05(void);
         ~HC05();
-
-        uint read(char *pBuffer, uint uBufferSize);
-        bool write(const char *pBuffer);
 };
 
 
