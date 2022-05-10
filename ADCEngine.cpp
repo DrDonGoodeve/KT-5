@@ -310,11 +310,7 @@ guADCLine = __LINE__;
 
 /// Attach a consumer to process the next frame. If no frame is available,
 /// returns 'false' and cConsumer::process will not be called.
-bool ADCEngine::processFrame(Consumer *pConsumer) {
-    if (nullptr == pConsumer) {
-        return false;
-    }
-    
+bool ADCEngine::processFrame(Consumer &cConsumer) {   
     Frame *pFrame(nullptr);   // Grab signal frame to process
     {   ScopedLock cLock(&mcStoreLock);
         if (mpSignalListHead != nullptr) {
@@ -331,7 +327,7 @@ bool ADCEngine::processFrame(Consumer *pConsumer) {
 
     // Consumer now has exclusive access to frame
     //printf("Calling Consumer.process\r\n");
-    pConsumer->process(*pFrame);
+    cConsumer.process(*pFrame);
 
     // Release consumed frame into free list
     {   ScopedLock cLock(&mcStoreLock);

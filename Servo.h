@@ -31,14 +31,22 @@
 //-----------------------------------------------------------------------------
 class Servo {
     private:
+        friend void _pwmIRQ(void);
+        
         bool mbIsValid;
-        uint muGPIO;            ///< 
+        uint muGPIO;
         uint muSlice;
         uint muChan;
         uint muServoCountMin;
         uint muServoCountMax;
         bool mbLongestPulseIsMax;
         float mfCurrentPosn;
+        uint16_t muCurrentPWM;
+        uint16_t muTargetPWM;
+
+        // Set the PWM to the next value tracking towards muTargetPWM
+        // from muCurrentPWM
+        void adjustPWMSetting(void);
 
     public:
         /// Construct a Servo object managing the specified pin. User can
@@ -61,7 +69,9 @@ class Servo {
         bool isValid(void) const;
 
         /// Set servo position in the range 0.0f to 1.0f
-        void setPosition(float fPosition);
+        /// If bTracking is set, smooth it out using PWM cycle completion
+        /// interrupt.
+        void setPosition(float fPosition, bool bTracking=true);
 };
 
 #endif // _SERVO_

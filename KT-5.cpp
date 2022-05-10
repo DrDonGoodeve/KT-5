@@ -32,9 +32,14 @@
 
 // Defines
 //*****************************************************************************
+#define kAppName                "KT-5"
+#define kVersion                "1.0"
+
 #define kDialServoGPIO          (14)   ///< Dial servo is on GPIO14 (pin 19)
-#define kAppInfo1               "@(4,16,-6)KT-5" 
-#define kAppInfo2               "@(2,%d,32)reloaded..."
+#define kAppInfo1               "@(4,16,-6)" kAppName
+#define kSlidePrefix            "@(2,%d,32)"
+#define kSlideAppInfo2          kSlidePrefix "reloaded..."
+#define kSlideVersion           kSlidePrefix "version " kVersion
 #define kADCChannel             (0)
 #define kSampleRateHz           (10.0e3f)
 #define kADCBuffer              (500.0e-3f)
@@ -59,6 +64,8 @@ typedef enum _displayCycle {
 volatile uint guKT5Line = 0;
 extern uint guOLEDLine;
 extern uint guADCLine;
+extern uint guServoLine;
+
 
 // Local variables
 //*****************************************************************************
@@ -165,6 +172,9 @@ static const struct {
     {"restart", kRestart, 0, "- restart KT-5"}
 };
 
+// _Command class
+// Encapsulates command parser, encode as 32-bits and decode from 32-bits
+//-------------------------------------
 class _Command {
     public:
         uint8_t muOpCode;
@@ -200,8 +210,10 @@ class _Command {
             }
 
             trim(sTag);
+            bool bFound(false);
             for(uint i=0; i<_arraysize(spCommands); i++) {
                 if (0 == sTag.compare(spCommands[i].pTag)) {
+                    bFound = true;
                     muOpCode = spCommands[i].eCode;
                     if (iArgs != spCommands[i].uArgs) {
                         printf("error: command '%s' takes %d arguments:\r\n\t%s\r\n", spCommands[i].pTag, spCommands[i].uArgs, spCommands[i].pInfo);
@@ -210,10 +222,16 @@ class _Command {
                     break;
                 }
             }
+            if (false == bFound) {
+                printf("Unknown command '%s'\r\n", sTag.c_str());
+                return;
+            }
+
+            // Handle here (return kIgnore) or return valid command code?
             switch(muOpCode) {
                 case kHelp:
                     muOpCode = kIgnore; // Always runs on core1 - aid with debugging
-                    printf("commands:\r\n");
+                    printf(kAppName " version " kVersion "- commands:\r\n");
                     for(uint i=0; i<_arraysize(spCommands); i++) {
                         printf("\t%s %s\r\n", spCommands[i].pTag, spCommands[i].pInfo);
                     }
@@ -226,7 +244,7 @@ class _Command {
 
                 case kDiag:
                     muOpCode = kIgnore;
-                    printf("KT5:%d, OLED:%d, ADC:%d\r\n", guKT5Line, guOLEDLine, guADCLine);
+                    printf("KT5:%d, OLED:%d, ADC:%d, Servo:%d\r\n", guKT5Line, guOLEDLine, guADCLine, guServoLine);
                     break;
 
                 default:
@@ -255,8 +273,9 @@ class _Command {
 };
 
 // Blocking loop - launch on core 1
-void _commandProcessor(void) {
-    printf("KT-5 Running\r\n(waiting for command...)\r\n");
+//-------------------------------------
+static void _commandProcessor(void) {
+    printf("KT-5 " kVersion " running\r\n(waiting for command...)\r\n");
     
     while(true) {
         std::string sInput;
@@ -269,11 +288,14 @@ void _commandProcessor(void) {
     }
 }
 
-bool _getCommand(_Command &cCommand) {
-    uint32_t uCmd(0x0);
+// Poll for command from FIFO
+//-------------------------------------
+static bool _getCommand(_Command &cCommand) {
     if (false == multicore_fifo_rvalid()) {
         return false;
     }
+
+    uint32_t uCmd(0x0);
     if (false == multicore_fifo_pop_timeout_us(10LL, &uCmd)) {
         return false;
     }
@@ -289,28 +311,35 @@ int main(void) {
     stdio_init_all();
 
     // Startup display
-    OLED *pDisplay(new OLED());
-    pDisplay->show(kAppInfo1);
+    OLED cDisplay;
+    cDisplay.show(kAppInfo1);
     sleep_ms(500);
 
     // Setup connection to HC-05
-    HC05 *pBluetooth(new HC05());
+    HC05 cBluetooth;
 
-   guKT5Line = __LINE__;
-   for(uint i=128; i>2; i--) {
+    // Banner display
+    guKT5Line = __LINE__;
+    for(uint i=128; i>2; i--) {
         char pBuffer[64];
-        sprintf(pBuffer, kAppInfo1 kAppInfo2, i);
-        pDisplay->show(pBuffer);
+        sprintf(pBuffer, kAppInfo1 kSlideAppInfo2, i);
+        cDisplay.show(pBuffer);
+        sleep_ms(5);
+    }
+    sleep_ms(400);
+    for(uint i=128; i>0; i--) {
+        char pBuffer[64];
+        sprintf(pBuffer, kAppInfo1 kSlideVersion, i);
+        cDisplay.show(pBuffer);
         sleep_ms(5);
     }
 
     // Create dial servo object and zero position
     guKT5Line = __LINE__;
-    Servo *pDial(new Servo(kDialServoGPIO, 0.0f, false));
-    pDial->setPosition(1.0f);
-    sleep_ms(500);
-    pDial->setPosition(0.0f);
-    sleep_ms(2000);
+    Servo cDial(kDialServoGPIO, 1.0f, false);
+    sleep_ms(400);
+    cDial.setPosition(0.0f, false);
+    sleep_ms(400);
 
     // Alive LED
     guKT5Line = __LINE__;
@@ -325,13 +354,13 @@ int main(void) {
 
     // Create measurement object
     guKT5Line = __LINE__;
-    SpeedMeasurement *pMeasure(new SpeedMeasurement(kSampleRateHz));
+    SpeedMeasurement cMeasure(kSampleRateHz);
 
     // Create ADCEngine and start sampling
     guKT5Line = __LINE__;
-    ADCEngine *pADC(new ADCEngine(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames));
+    ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
     guKT5Line = __LINE__;
-    pADC->setActive(true);
+    cADC.setActive(true);
 
     // Setup display update rollover timer
     add_repeating_timer_ms(kDisplayUpdateTimerPeriod, _displayUpdateCallback, nullptr, &mcDisplayTimer);
@@ -342,14 +371,14 @@ int main(void) {
 guKT5Line = __LINE__;
         while(false == sbDisplayUpdateDue) {
 guKT5Line = __LINE__;
-            if (false == pADC->processFrame(pMeasure)) {
+            if (false == cADC.processFrame(cMeasure)) {
                 //printf(".");
                 sleep_ms(kProcessingPause);
             } else {
                 if (true == bServoAuto) {
                     // Update dial every time a new measurement is made...
-                    float fKts(pMeasure->getSpeedKts());
-                    pDial->setPosition(_getServoPosnForKts(fKts));
+                    float fKts(cMeasure.getSpeedKts());
+                    cDial.setPosition(_getServoPosnForKts(fKts));
                 }        
             }
 guKT5Line = __LINE__;
@@ -367,11 +396,13 @@ guKT5Line = __LINE__;
         if (true == _getCommand(cCommand)) {
             printf("Command %d, a1:%d, a2:%d\r\n", cCommand.muOpCode, cCommand.muData1, cCommand.muData2);
             switch(cCommand.muOpCode) {
-                case kServoOn: bServoAuto = true; break;
-                case kServoOff: bServoAuto = false; break;
+                case kServoOn: printf("servo AUTO\r\n"); bServoAuto = true; break;
+                case kServoOff: printf("servo MANUAL\r\n"); bServoAuto = false; break;
                 case kServoPos: {
-                    float fPosn((float)cCommand.muData1 / 255.0f);
-                    pDial->setPosition(fPosn);
+                    uint8_t uPosn(cCommand.muData1);
+                    printf("servo position = %d\r\n", uPosn);
+                    float fPosn((float)uPosn / 255.0f);
+                    cDial.setPosition(fPosn);
                     break;
                 }
                 default:
@@ -384,24 +415,24 @@ guKT5Line = __LINE__;
         char pBuffer[64];
         switch(seDisplayCycle) {
             case kDisplaySpeed: {
-                float fKts(pMeasure->getSpeedKts());
+                float fKts(cMeasure.getSpeedKts());
                 sprintf(pBuffer, "@(4,40,-6)%.1f@(2,10,34)K N O T S", fKts); 
                 break;
             }
             case kDisplayTime: {
-                uint uSec((uint)roundf(pMeasure->getSecondsElapsed()));
+                uint uSec((uint)roundf(cMeasure.getSecondsElapsed()));
                 uint uHrs(uSec / 3600); uSec -= (uHrs*3600);
                 uint uMin(uSec / 60); uSec -= (uMin*60);
                 sprintf(pBuffer, "@(3,0,-4)%02d:%02d:%02d@(2,10,34)ELAPSED", uHrs, uMin, uSec);
                 break;
             }
             case kDisplayAvgSpeed: {
-                float fKtsAvg(pMeasure->getAvgSpeedKts());
+                float fKtsAvg(cMeasure.getAvgSpeedKts());
                 sprintf(pBuffer, "@(4,16,-6)%.3f@(2,20,34)avg KTS", fKtsAvg);
                 break;
             }
             case kDisplayDistance: default: {
-                float fNM(pMeasure->getDistanceTravelledNm());
+                float fNM(cMeasure.getDistanceTravelledNm());
                 sprintf(pBuffer, "@(4,30,-6)%.2f@(2,20,34)SEA nm", fNM);
                 break;
             }
@@ -410,7 +441,7 @@ guKT5Line = __LINE__;
 guKT5Line = __LINE__;
         std::string sDisplay(pBuffer);
 guKT5Line = __LINE__;
-        pDisplay->show(sDisplay);
+        cDisplay.show(sDisplay);
 guKT5Line = __LINE__;
     }
 }

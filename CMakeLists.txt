@@ -23,13 +23,14 @@ set(PICO_CXX_ENABLE_RTTI 1)
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
-add_executable(KT-5 KT-5.cpp Servo.cpp ADCEngine.cpp SpeedMeasurement.cpp OLED.cpp)
+add_executable(KT-5 KT-5.cpp Servo.cpp ADCEngine.cpp SpeedMeasurement.cpp OLED.cpp HC-05.cpp)
 
 pico_set_program_name(KT-5 "KT-5")
-pico_set_program_version(KT-5 "0.2")
+pico_set_program_version(KT-5 "0.3")
 
-pico_enable_stdio_uart(KT-5 0)
-pico_enable_stdio_usb(KT-5 1)
+# Via UART or USB?
+pico_enable_stdio_uart(KT-5 1)
+pico_enable_stdio_usb(KT-5 0)
 
 # Add the standard library to the build
 target_link_libraries(KT-5 pico_stdlib pico_sync)
@@ -48,6 +49,7 @@ target_link_libraries(KT-5
         hardware_adc
         pico_ssd1306
         hardware_i2c
+        pico_multicore
 )
 
 pico_add_extra_outputs(KT-5)
