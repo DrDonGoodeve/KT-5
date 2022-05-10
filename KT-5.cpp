@@ -21,6 +21,7 @@
 #include "hardware/clocks.h"
 #include "hardware/irq.h"
 #include "hardware/pwm.h"
+#include "hardware/watchdog.h"
 #include "pico/multicore.h"
 
 #include "Servo.h"
@@ -163,13 +164,13 @@ static const struct {
     {"raw", kInput, 0, "- display current raw transducer signal"},
     {"kts", kReportKts, 0, "- show mappings of kts to raw transducer signal"},
     {"setkts", kSetKtsVal, 2, "<kts> <raw> - set mapping from raw value to kts"},
-    {"servokts", kReportServoKts, 0, "- show mappings of kts to servo posn"},
-    {"setservo", kSetServoKts, 2, "<kts> <posn> - set mapping of kts to servo posn"},
-    {"servoauto", kServoOn, 0, "- switch servo to auto (default)"},
-    {"servoman", kServoOff, 0, "- switch servo to manual"},
-    {"servopos", kServoPos, 1, "<posn> - set servo posn (manual mode only)"},
+    {"serkts", kReportServoKts, 0, "- show mappings of kts to servo posn"},
+    {"setsp", kSetServoKts, 2, "<kts> <posn> - set mapping of kts to servo posn"},
+    {"sauto", kServoOn, 0, "- switch servo to auto (default)"},
+    {"sman", kServoOff, 0, "- switch servo to manual"},
+    {"spos", kServoPos, 1, "<posn> - set servo posn (manual mode only)"},
     {"save", kSave, 0, "- save all settings to flash"},
-    {"restart", kRestart, 0, "- restart KT-5"}
+    {"rs", kRestart, 0, "- restart KT-5"}
 };
 
 // _Command class
@@ -240,6 +241,9 @@ class _Command {
                 case kRestart:
                     muOpCode = kIgnore;
                     printf("Restarting...");
+                    watchdog_enable(1, 1);
+                    while(true) {
+                    }
                     break;
 
                 case kDiag:
