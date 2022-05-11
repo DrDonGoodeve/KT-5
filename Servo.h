@@ -41,6 +41,7 @@ class Servo {
         uint muServoCountMax;
         bool mbLongestPulseIsMax;
         float mfCurrentPosn;
+        uint8_t muRate;
         uint16_t muCurrentPWM;
         uint16_t muTargetPWM;
 
@@ -72,6 +73,9 @@ class Servo {
         /// If bTracking is set, smooth it out using PWM cycle completion
         /// interrupt.
         void setPosition(float fPosition, bool bTracking=true);
+
+        /// Set servo tracking rate
+        void setRate(uint8_t uRate);
 };
 
 #endif // _SERVO_

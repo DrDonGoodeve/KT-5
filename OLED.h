@@ -41,14 +41,8 @@ class OLED {
         /// <font>, <font><iX><iY>
         void show(const std::string &sText);
 
-        // Clear and reset display
-        void clear(void);
-
         // Set display contrast
         void setContrast(uint8_t uContrast);
-
-        // Scroll out the entire display to left or right until cleared
-        void scrollOut(bool bLeftNotRight);
 };
 
 #endif // _OLED_

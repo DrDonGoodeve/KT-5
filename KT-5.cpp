@@ -34,7 +34,7 @@
 // Defines
 //*****************************************************************************
 #define kAppName                "KT-5"
-#define kVersion                "1.0"
+#define kVersion                "B.7"
 
 #define kDialServoGPIO          (14)   ///< Dial servo is on GPIO14 (pin 19)
 #define kAppInfo1               "@(4,16,-6)" kAppName
@@ -49,7 +49,9 @@
 #define kDisplayUpdatePeriod        (2000)
 #define kDisplayUpdateTimerPeriod   (200)
 
-#define kKtsPositions   (8)
+#define kKtsPositions   (9)
+
+#define kSettingsMagic          (0x5e771235)
 
 
 // Local types
@@ -85,8 +87,15 @@ repeating_timer_t mcDisplayTimer;
 //-----------------------------------------------------------------------------
 class Settings {
     public:
-        uint8_t mpServoKts[kKtsPositions];      // Map integer kts to servo position
-        uint8_t mpKtsForReading[kKtsPositions]; // Map reading to kts
+        uint32_t muMagic;                           // Magic number
+        uint8_t mpServoKts[kKtsPositions];          // Map integer kts to servo position
+        uint8_t mpKtsForReading[kKtsPositions];     // Map reading to kts
+        uint8_t muServoRate;                        // Servo tracking rate
+}spSettings = {
+    kSettingsMagic,
+    {0, 255/8, 255/7, 255/6, 255/5, 255/4, 255/3, 255/2, 255/1},
+    {0, 255/8, 255/7, 255/6, 255/5, 255/4, 255/3, 255/2, 255/1},
+    30
 };
 
 // The servo is not centered on the dial - and hence to get the digits lining
@@ -96,23 +105,21 @@ class Settings {
 // deflection for servo. Hull speed is around 6.2 knots...)
 //-----------------------------------------------------------------------------
 static float _getServoPosnForKts(float fKts) {
-    static const float pfPosn[] = {	// Remapping table
-    //	0kts	1kt	    2kts	3kts	4kts	5kts	6kts	7kts	8kts
-        0.0f, 	0.17f, 	0.32f, 	0.435f,	0.58f,	0.70f, 	0.83f,	0.93f,	1.0f
-    };
+    //static const float pfPosn[] = {	// Remapping table
+    ////	0kts	1kt	    2kts	3kts	4kts	5kts	6kts	7kts	8kts
+    //    0.0f, 	0.17f, 	0.32f, 	0.435f,	0.58f,	0.70f, 	0.83f,	0.93f,	1.0f
+    //};
 
     // Constrain kts parameter to be in valid range
     fKts = ((fKts < 0.0f)?0.0f:(fKts > 8.0f)?8.0f:fKts);
 
     // Compute table indices
     uint uPreIndex((uint)floorf(fKts)), uPostIndex((uint)ceilf(fKts));
-    if (uPreIndex == uPostIndex) {
-        return pfPosn[uPreIndex];
-    }
+    float fPos1((float)spSettings.mpServoKts[uPreIndex]/255.0f), fPos2(spSettings.mpServoKts[uPostIndex]/255.0f);
 
     // Linear interpolate for intermediate positions
     float fAlpha(fKts - (float)uPreIndex);
-    float fPosn((fAlpha * pfPosn[uPostIndex]) + ((1.0f - fAlpha)*pfPosn[uPreIndex]));
+    float fPosn((fAlpha * fPos2) + ((1.0f - fAlpha)*fPos1));
     return fPosn;
 }
 
@@ -140,15 +147,16 @@ typedef enum {
     kNoOp,           // Null operation
     kIgnore,         // Ignore the command
     kHelp,           // Help command
-    kDiag,
+    kDiag,           // Display diagnostics
     kInput,          // Report raw input
-    kReportKts,     // <kts> report input mapped to kts
-    kSetKtsVal,     // <kts> <input> set kts map to input
+    kReportKts,      // <kts> report input mapped to kts
+    kSetKtsVal,      // <kts> <input> set kts map to input
     kReportServoKts, // <kts> report posn mapped to kts
     kSetServoKts,    // <kts> <posn> set kts map to posn
     kServoOn,        // servo response on
     kServoOff,       // servo response off
     kServoPos,       // set servo position
+    kServoRate,      // set servo tracking rate
     kSave,           // save settings to flash
     kRestart         // Force restart
 }OpCode;
@@ -169,6 +177,7 @@ static const struct {
     {"sauto", kServoOn, 0, "- switch servo to auto (default)"},
     {"sman", kServoOff, 0, "- switch servo to manual"},
     {"spos", kServoPos, 1, "<posn> - set servo posn (manual mode only)"},
+    {"srate", kServoRate, 1, "<rate> - set servo tracking rate (1-255)"},
     {"save", kSave, 0, "- save all settings to flash"},
     {"rs", kRestart, 0, "- restart KT-5"}
 };
@@ -341,6 +350,7 @@ int main(void) {
     // Create dial servo object and zero position
     guKT5Line = __LINE__;
     Servo cDial(kDialServoGPIO, 1.0f, false);
+    cDial.setRate(spSettings.muServoRate);
     sleep_ms(400);
     cDial.setPosition(0.0f, false);
     sleep_ms(400);
@@ -398,8 +408,14 @@ guKT5Line = __LINE__;
 guKT5Line = __LINE__;
         _Command cCommand;
         if (true == _getCommand(cCommand)) {
-            printf("Command %d, a1:%d, a2:%d\r\n", cCommand.muOpCode, cCommand.muData1, cCommand.muData2);
             switch(cCommand.muOpCode) {
+                case kInput: printf("Raw reading = %d\r\n", cMeasure.getRaw()); break;
+                case kServoRate: {
+                    spSettings.muServoRate = cCommand.muData1;
+                    printf("servo rate %d\r\n", spSettings.muServoRate); 
+                    cDial.setRate(spSettings.muServoRate);
+                    break;
+                }
                 case kServoOn: printf("servo AUTO\r\n"); bServoAuto = true; break;
                 case kServoOff: printf("servo MANUAL\r\n"); bServoAuto = false; break;
                 case kServoPos: {
@@ -410,6 +426,7 @@ guKT5Line = __LINE__;
                     break;
                 }
                 default:
+                    printf("Command %d, a1:%d, a2:%d\r\n", cCommand.muOpCode, cCommand.muData1, cCommand.muData2);
                     break;
             }
         }

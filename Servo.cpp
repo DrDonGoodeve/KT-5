@@ -34,7 +34,8 @@
 #define kCountMax       (kPWMCountMax - kExcessClocks)
 #define kExactPeriod    ((float)kCountMax * kDividedClkPer)
 #define kExactFreq      (1.0f / kExactPeriod)
-#define kMaxStep        (30)
+#define kDefaultRate    (30)
+#define kMinRate        (3)
 
 
 // Macros
@@ -69,7 +70,7 @@ Servo::Servo(
     float fMinPulseSec, float fMaxPulseSec) :
     mbIsValid(false), mbLongestPulseIsMax(bLongestPulseIsMaxPosition),
     muGPIO(uGPIO), muSlice(pwm_gpio_to_slice_num(uGPIO)), muChan(pwm_gpio_to_channel(uGPIO)),
-    muTargetPWM(0), muCurrentPWM(0) {
+    muTargetPWM(0), muCurrentPWM(0), muRate(kDefaultRate) {
 
     // Sanity checks
     if (fMinPulseSec >= fMaxPulseSec) {
@@ -135,6 +136,11 @@ void Servo::setPosition(float fPosition, bool bTracking) {
     }
 }
 
+/// Set servo tracking rate
+void Servo::setRate(uint8_t uRate) {
+    muRate = _max(kMinRate, uRate);
+}
+
 // Set the PWM to the next value tracking towards muTargetPWM
 // from muCurrentPWM
 //-----------------------------------------------------------------------------
@@ -143,12 +149,12 @@ void Servo::adjustPWMSetting(void) {
     if (muTargetPWM < muCurrentPWM) {
     guServoLine = __LINE__;
         uint16_t uDiff(muCurrentPWM - muTargetPWM);
-        uint16_t uDelta(_min(uDiff, kMaxStep));
+        uint16_t uDelta(_min(uDiff, muRate));
         muCurrentPWM -= uDelta;
     } else if (muTargetPWM > muCurrentPWM) {
      guServoLine = __LINE__;
         uint16_t uDiff(muTargetPWM - muCurrentPWM);
-        uint16_t uDelta(_min(uDiff, kMaxStep));
+        uint16_t uDelta(_min(uDiff, muRate));
         muCurrentPWM += uDelta;
     }
     pwm_set_chan_level(muSlice, muChan, muCurrentPWM);

@@ -44,8 +44,9 @@ bool _integrationCallback(repeating_timer_t *pTimer) {
 // Implementation of SpeedMeasurement class.
 //-----------------------------------------------------------------------------
 SpeedMeasurement::SpeedMeasurement(float fSampleRateHz) :
-    mfSampleRateHz(fSampleRateHz), mfIntegratedSpeedKts(0.0f),
-    mfCurrentSpeedKts(0.0f), mfDistanceTravelledNm(0.0f), muElapsedTimeSec(0) {
+    mfSampleRateHz(fSampleRateHz), muRawMeasurement(0), 
+    mfIntegratedSpeedKts(0.0f), mfCurrentSpeedKts(0.0f), 
+    mfDistanceTravelledNm(0.0f), muElapsedTimeSec(0) {
 
     // Start 1 second timer (integration mechanism)
     add_repeating_timer_ms(1000, _integrationCallback, (void*)this, &mcTimer);
@@ -68,12 +69,17 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
         uint8_t uValue(*(pData++));
         uMax = (uValue>uMax)?uValue:uMax;
     }
+    muRawMeasurement = uMax;
 
     //printf("Process frame uMax = %d\r\n", uMax);
     mfCurrentSpeedKts = ((float)uMax / 255.0f) * 8.0f;
 }
 
 /// Parameter reporting
+uint8_t SpeedMeasurement::getRaw(void) const {
+    return muRawMeasurement;
+}
+
 float SpeedMeasurement::getSpeedKts(void) const {
     return mfCurrentSpeedKts;
 }

@@ -34,6 +34,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
 
         repeating_timer_t mcTimer;  // Required for integration mechanism
 
+        uint8_t muRawMeasurement;   // Current raw measurement
         float mfCurrentSpeedKts;    // Computed current speed
         uint muElapsedTimeSec;      // Time since start
         float mfDistanceTravelledNm;
@@ -51,6 +52,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         virtual void process(const ADCEngine::Frame &cFrame);
 
         /// Parameter reporting
+        uint8_t getRaw(void) const;
         float getSpeedKts(void) const;
         float getAvgSpeedKts(void) const;
         float getSecondsElapsed(void) const;
