@@ -23,7 +23,7 @@ set(PICO_CXX_ENABLE_RTTI 1)
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
-add_executable(KT-5 KT-5.cpp Servo.cpp ADCEngine.cpp SpeedMeasurement.cpp OLED.cpp HC-05.cpp)
+add_executable(KT-5 KT-5.cpp Servo.cpp ADCEngine.cpp SpeedMeasurement.cpp OLED.cpp HC-05.cpp Flash.cpp)
 
 pico_set_program_name(KT-5 "KT-5")
 pico_set_program_version(KT-5 "0.3")
@@ -47,9 +47,11 @@ target_link_libraries(KT-5
         hardware_irq
         hardware_rtc
         hardware_adc
-        pico_ssd1306
+        hardware_flash
         hardware_i2c
+        hardware_sync
         pico_multicore
+        pico_ssd1306
 )
 
 pico_add_extra_outputs(KT-5)

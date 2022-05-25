@@ -29,29 +29,40 @@
 #include "SpeedMeasurement.h"
 #include "OLED.h"
 #include "HC-05.h"
+#include "Flash.h"
 
 
 // Defines
 //*****************************************************************************
+// Application information
 #define kAppName                "KT-5"
-#define kVersion                "B.7"
-
-#define kDialServoGPIO          (14)   ///< Dial servo is on GPIO14 (pin 19)
+#define kVersion                "B.8"
 #define kAppInfo1               "@(4,16,-6)" kAppName
 #define kSlidePrefix            "@(2,%d,32)"
 #define kSlideAppInfo2          kSlidePrefix "reloaded..."
 #define kSlideVersion           kSlidePrefix "version " kVersion
-#define kADCChannel             (0)
-#define kSampleRateHz           (10.0e3f)
-#define kADCBuffer              (500.0e-3f)
-#define kADCFrames              (4)
-#define kProcessingPause        (50)
+#define kKT5SettingsSignature   (0x7155e771)
+
+// ADC sampling control
+#define kADCChannel                 (2)
+#define kSampleRateHz               (10.0e3f)
+#define kADCBuffer                  (500.0e-3f)
+#define kADCFrames                  (4)
+
+// Display control
+#define kProcessingPause            (50)
 #define kDisplayUpdatePeriod        (2000)
 #define kDisplayUpdateTimerPeriod   (200)
 
-#define kKtsPositions   (9)
+// Servo control
+#define kDialServoGPIO          (14)   ///< Dial servo is on GPIO14 (pin 19)
+#define kDefaultServoRate       (30)
+#define kDefaultServoMin        (18)
+#define kDefaultServoMax        (235)
 
-#define kSettingsMagic          (0x5e771235)
+// Settings information
+#define kKtsPositions   (9)
+#define kSettingsMagic  (0x5e771235)
 
 
 // Local types
@@ -90,12 +101,16 @@ class Settings {
         uint32_t muMagic;                           // Magic number
         uint8_t mpServoKts[kKtsPositions];          // Map integer kts to servo position
         uint8_t mpKtsForReading[kKtsPositions];     // Map reading to kts
-        uint8_t muServoRate;                        // Servo tracking rate
-}spSettings = {
+        uint8_t muServoRate;                        // Servo tracking rate (default 30)
+        uint8_t muServoMin;                         // In 100s of us minus 300 (default 18 for 480us)
+        uint8_t muServoMax;                         // In 100s of us minus 300 (default 235 for 2650us)
+}scSettings = {
     kSettingsMagic,
-    {0, 255/8, 255/7, 255/6, 255/5, 255/4, 255/3, 255/2, 255/1},
-    {0, 255/8, 255/7, 255/6, 255/5, 255/4, 255/3, 255/2, 255/1},
-    30
+    {0, 1*(256/8), 2*(256/8), 3*(256/8), 4*(256/8), 5*(256/8), 6*(256/8), 7*(256/8), 255},
+    {0, 1*(256/8), 2*(256/8), 3*(256/8), 4*(256/8), 5*(256/8), 6*(256/8), 7*(256/8), 255},
+    kDefaultServoRate,
+    kDefaultServoMin,
+    kDefaultServoMax
 };
 
 // The servo is not centered on the dial - and hence to get the digits lining
@@ -115,7 +130,7 @@ static float _getServoPosnForKts(float fKts) {
 
     // Compute table indices
     uint uPreIndex((uint)floorf(fKts)), uPostIndex((uint)ceilf(fKts));
-    float fPos1((float)spSettings.mpServoKts[uPreIndex]/255.0f), fPos2(spSettings.mpServoKts[uPostIndex]/255.0f);
+    float fPos1((float)scSettings.mpServoKts[uPreIndex]/255.0f), fPos2(scSettings.mpServoKts[uPostIndex]/255.0f);
 
     // Linear interpolate for intermediate positions
     float fAlpha(fKts - (float)uPreIndex);
@@ -149,15 +164,16 @@ typedef enum {
     kHelp,           // Help command
     kDiag,           // Display diagnostics
     kInput,          // Report raw input
-    kReportKts,      // <kts> report input mapped to kts
+    kReportKts,      // Report input map to kts
     kSetKtsVal,      // <kts> <input> set kts map to input
-    kReportServoKts, // <kts> report posn mapped to kts
+    kReportServoKts, // Report servo posn map to kts
     kSetServoKts,    // <kts> <posn> set kts map to posn
     kServoOn,        // servo response on
-    kServoOff,       // servo response off
     kServoPos,       // set servo position
+    kServoTime,      // set servo min and max pulse
     kServoRate,      // set servo tracking rate
     kSave,           // save settings to flash
+    kResetFlash,     // reset flash
     kRestart         // Force restart
 }OpCode;
 
@@ -175,10 +191,11 @@ static const struct {
     {"serkts", kReportServoKts, 0, "- show mappings of kts to servo posn"},
     {"setsp", kSetServoKts, 2, "<kts> <posn> - set mapping of kts to servo posn"},
     {"sauto", kServoOn, 0, "- switch servo to auto (default)"},
-    {"sman", kServoOff, 0, "- switch servo to manual"},
-    {"spos", kServoPos, 1, "<posn> - set servo posn (manual mode only)"},
+    {"spos", kServoPos, 1, "<posn> - set servo auto tracking off and move to posn"},
+    {"stime", kServoTime, 2, "<min> <max> servo pulse in units of 10us - add 300us"},
     {"srate", kServoRate, 1, "<rate> - set servo tracking rate (1-255)"},
     {"save", kSave, 0, "- save all settings to flash"},
+    {"rsf", kResetFlash, 2, "92 113 - if codes are entered correctly, erase flash"},
     {"rs", kRestart, 0, "- restart KT-5"}
 };
 
@@ -349,11 +366,23 @@ int main(void) {
 
     // Create dial servo object and zero position
     guKT5Line = __LINE__;
-    Servo cDial(kDialServoGPIO, 1.0f, false);
-    cDial.setRate(spSettings.muServoRate);
+    float fMinPulse(((float)scSettings.muServoMin * 10.0e-6f) + 300.0e-6f);
+    float fMaxPulse(((float)scSettings.muServoMax * 10.0e-6f) + 300.0e-6f);
+    printf("min = %.6f, max = %.6f\r\n", fMinPulse, fMaxPulse);
+    Servo cDial(kDialServoGPIO, 1.0f, false, fMinPulse, fMaxPulse);
+    cDial.setRate(scSettings.muServoRate);
     sleep_ms(400);
     cDial.setPosition(0.0f, false);
     sleep_ms(400);
+
+    // Open flash memory archive and retrieve current settings (if present)
+    Flash cFlash;
+    uint8_t uSize(0);
+    const uint8_t *pFlashSettings(cFlash.readBlock(kKT5SettingsSignature, uSize));
+    if ((pFlashSettings != nullptr) && (uSize == sizeof(scSettings))) {
+        printf("DEBUG: Found correct size structure\r\n");
+        memcpy((void*)&scSettings, pFlashSettings, sizeof(scSettings));
+    }
 
     // Alive LED
     guKT5Line = __LINE__;
@@ -409,20 +438,81 @@ guKT5Line = __LINE__;
         _Command cCommand;
         if (true == _getCommand(cCommand)) {
             switch(cCommand.muOpCode) {
-                case kInput: printf("Raw reading = %d\r\n", cMeasure.getRaw()); break;
+                case kInput: 
+                    printf("Raw reading = %d\r\n", cMeasure.getRaw()); 
+                    break;
+                case kReportKts:
+                    printf("Input/kts mappings:\r\n");
+                    for(uint i=0; i<kKtsPositions; i++) {
+                        printf("%s%dkts=%d", (0==i)?"":", ", i, scSettings.mpKtsForReading[i]);
+                    }
+                    printf("\r\n");
+                    break;
+                case kSetKtsVal:
+                    if (cCommand.muData1 > 8) {
+                        printf("Kts value %d out of range (0-8)\r\n", cCommand.muData1);
+                        break;
+                    }
+                    scSettings.mpKtsForReading[cCommand.muData1] = cCommand.muData2;
+                    printf("%dkts map to raw reading %d\r\n", cCommand.muData1, cCommand.muData2);
+                    break;
+
+                case kReportServoKts:
+                    printf("Servo/kts mappings:\r\n");
+                    for(uint i=0; i<kKtsPositions; i++) {
+                        printf("%s%dkts=%d", (0==i)?"":", ", i, scSettings.mpServoKts[i]);
+                    }
+                    printf("\r\n");
+                    break;
+                case kSetServoKts:
+                    if (cCommand.muData1 > 8) {
+                        printf("Kts value %d out of range (0-8)\r\n", cCommand.muData1);
+                        break;
+                    }
+                    scSettings.mpServoKts[cCommand.muData1] = cCommand.muData2;
+                    printf("%dkts map to servo position %d\r\n", cCommand.muData1, cCommand.muData2);
+                    break;
                 case kServoRate: {
-                    spSettings.muServoRate = cCommand.muData1;
-                    printf("servo rate %d\r\n", spSettings.muServoRate); 
-                    cDial.setRate(spSettings.muServoRate);
+                    scSettings.muServoRate = cCommand.muData1;
+                    printf("servo rate %d\r\n", scSettings.muServoRate); 
+                    cDial.setRate(scSettings.muServoRate);
                     break;
                 }
-                case kServoOn: printf("servo AUTO\r\n"); bServoAuto = true; break;
-                case kServoOff: printf("servo MANUAL\r\n"); bServoAuto = false; break;
+                case kServoOn: 
+                    printf("servo AUTO\r\n"); 
+                    bServoAuto = true; 
+                    break;
                 case kServoPos: {
                     uint8_t uPosn(cCommand.muData1);
+                    bServoAuto = false;
                     printf("servo position = %d\r\n", uPosn);
                     float fPosn((float)uPosn / 255.0f);
                     cDial.setPosition(fPosn);
+                    break;
+                }
+                case kServoTime: {
+                    scSettings.muServoMin = cCommand.muData1;
+                    scSettings.muServoMax = cCommand.muData2;
+                    float fMinPulse(((float)scSettings.muServoMin * 10.0e-6f) + 300.0e-6f);
+                    float fMaxPulse(((float)scSettings.muServoMax * 10.0e-6f) + 300.0e-6f);
+                    printf("min = %.6f, max = %.6f\r\n", fMinPulse, fMaxPulse);
+                    cDial.setPulseLengths(fMinPulse, fMaxPulse);
+                    break;
+                }
+                case kSave: {
+                    printf("Saving all current settings to flash\r\n");
+                    bool bSuccess(cFlash.writeBlock(kKT5SettingsSignature, (const uint8_t*)&scSettings, sizeof(scSettings), _commandProcessor));
+                    printf("\t%s\r\n", (true==bSuccess)?"Ok":"Failed");
+                    break;
+                }
+                case kResetFlash: {
+                    if ((cCommand.muData1 == 91) && (cCommand.muData2 == 113)) {
+                        printf("Erasing flash\r\n");
+                        cFlash.eraseAndReset(_commandProcessor);
+                        printf("\terase complete\r\n");
+                    } else {
+                        printf("Incorrect enable code entered.\r\n");
+                    }
                     break;
                 }
                 default:

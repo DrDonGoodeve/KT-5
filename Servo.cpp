@@ -79,8 +79,7 @@ Servo::Servo(
     mbIsValid = true;
 
     // Determine minimum and maximum counts
-    muServoCountMin = ((uint)roundf((fMinPulseSec / kExactPeriod) * (float)kCountMax));
-    muServoCountMax = ((uint)roundf((fMaxPulseSec / kExactPeriod) * (float)kCountMax));
+    setPulseLengths(fMinPulseSec, fMaxPulseSec);
 
     // Determine PWM slice and channel for GPIO
     muSlice = pwm_gpio_to_slice_num(uGPIO);
@@ -135,6 +134,13 @@ void Servo::setPosition(float fPosition, bool bTracking) {
         muTargetPWM = uPWMCount;
     }
 }
+
+/// Modify min and max pulse settings
+void Servo::setPulseLengths(float fMinPulseSec, float fMaxPulseSec) {
+    muServoCountMin = ((uint)roundf((fMinPulseSec / kExactPeriod) * (float)kCountMax));
+    muServoCountMax = ((uint)roundf((fMaxPulseSec / kExactPeriod) * (float)kCountMax));
+}
+
 
 /// Set servo tracking rate
 void Servo::setRate(uint8_t uRate) {
