@@ -69,6 +69,9 @@ class Servo {
         /// is up and running.
         bool isValid(void) const;
 
+        /// Modify min and max pulse settings
+        void setPulseLengths(float fMinPulseSec, float fMaxPulseSec);
+
         /// Set servo position in the range 0.0f to 1.0f
         /// If bTracking is set, smooth it out using PWM cycle completion
         /// interrupt.
