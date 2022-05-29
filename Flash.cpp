@@ -10,6 +10,7 @@
 
 // Includes
 //-----------------------------------------------------------------------------
+#include <stdio.h>
 #include "pico/stdlib.h"
 #include "memory.h"
 #include "hardware/sync.h"
@@ -21,6 +22,7 @@
 //-----------------------------------------------------------------------------
 #define kPageSize           (1 << 8)
 #define kSectorSize         (1 << 12)
+#define kFlashSize          (2 * kM)
 #define kBlockMagic         (0xf1a548a2)
 
 
@@ -30,14 +32,14 @@ typedef struct {
     uint32_t muBlockMagic;
     uint32_t muUserSignature;
     uint8_t muBlockBytes;
+    uint32_t muGeneration;
 }_BlockHeader;
-
 
 // Flash class methods
 /// Manages stored persistent data - storage and recovery
 //-----------------------------------------------------------------------------
-Flash::_BlockType::_BlockType(uint32_t uSignature, uint32_t uAddress, uint8_t uSize) :
-    muSignature(uSignature), muAddress(uAddress), muSize(uSize) {
+Flash::_BlockType::_BlockType(uint32_t uSignature, uint32_t uAddress, uint8_t uSize, uint32_t uGeneration) :
+    muSignature(uSignature), muAddress(uAddress), muSize(uSize), muGeneration(uGeneration) {
 }
 
 Flash::_BlockType &Flash::_BlockType::operator=(const Flash::_BlockType &cOther) {
@@ -47,35 +49,42 @@ Flash::_BlockType &Flash::_BlockType::operator=(const Flash::_BlockType &cOther)
     return *this;
 }
 
-Flash::Flash(uint32_t uBase, uint32_t uSectors) :
-    muBaseAddress(XIP_BASE + ((((uBase / kSectorSize) + (((uBase%kSectorSize) != 0)?1:0)) * kSectorSize))),
+Flash::Flash(uint32_t uSectors) :
+    muBaseAddress(XIP_BASE + kFlashSize - (uSectors*kSectorSize)),
     muSectors(uSectors) {
 
     // Populate the list of known blocks. Run up from muBaseAddress by pages looking for valid
     // signatures. Higher address blocks supercede those found at lower addresses.
     uint32_t uTop(muBaseAddress + (kSectorSize * muSectors));
+    printf("FLASH muBaseAddress = 0x%08x, muTop = 0x%08x\r\n", muBaseAddress, uTop);
     for(uint32_t uAddress = muBaseAddress; uAddress < uTop; uAddress += kPageSize) {
+        printf("Reading page at 0x%08x\r\n", uAddress);
         const uint8_t *pRd((const uint8_t *)uAddress);
         _BlockHeader cHeader = {0x0, 0x0, 0x0};
         memcpy(&cHeader, pRd, sizeof(cHeader));
         if (cHeader.muBlockMagic == kBlockMagic) {
             // Found valid block - populate into list
-            Flash::_BlockType cBlock(cHeader.muUserSignature, uAddress, cHeader.muBlockBytes);
+            Flash::_BlockType cBlock(cHeader.muUserSignature, uAddress, cHeader.muBlockBytes, cHeader.muGeneration);
             bool bFound(false);
             for(std::list<Flash::_BlockType>::iterator cIter = mlKnownBlocks.begin(); cIter != mlKnownBlocks.end(); ++cIter) {
                 if ((*cIter).muSignature == cBlock.muSignature) {
-                    // If same signature exists in list already - replace it
-                    (*cIter) = cBlock;
+                    // If same signature exists in list already - replace it if the generation number is the same or higher
+                    // otherwise we simply ignore it.
                     bFound = true;
+                    if (cBlock.muGeneration >= (*cIter).muGeneration) {
+                        (*cIter) = cBlock;
+                    }
                     break;
                 }
             }
             if (false == bFound) {
                 // Not seen this signature before - insert into list
                 mlKnownBlocks.push_back(cBlock);
+                printf("Known blocks now has %d entries\r\n", mlKnownBlocks.size());
             }
         } else {
             mlFreePages.push_back(uAddress);
+            printf("Now have %d free pages\r\n", mlFreePages.size());
         }
     }
 }
@@ -90,7 +99,7 @@ bool Flash::eraseAndReset(void (*pfCore1EntryPoint)(void)) {
     multicore_reset_core1();
 
     // Do write
-    flash_range_erase(muBaseAddress, muSectors * kSectorSize);
+    flash_range_erase(muBaseAddress-XIP_BASE, muSectors * kSectorSize);
 
     // Re-enable core1 and interrupts
     if (pfCore1EntryPoint != nullptr) {
@@ -134,13 +143,16 @@ class _ScopedProtectFlash {
     public:
         _ScopedProtectFlash(void (*pfCore1EntryPoint)(void) = nullptr) :
             mpfCore1EntryPoint(pfCore1EntryPoint) {
+            printf("Scoped protect enter with entrypoint 0x%08x\r\n", mpfCore1EntryPoint);
             muInterruptEnables = save_and_disable_interrupts();
             multicore_reset_core1();
+            printf("Scoped protect active\r\n");
         }
 
         ~_ScopedProtectFlash() {
+            printf("Exit scoped protect\r\n");
+            restore_interrupts(muInterruptEnables);
             if (mpfCore1EntryPoint != nullptr) {
-                restore_interrupts(muInterruptEnables);
                 multicore_launch_core1(mpfCore1EntryPoint);
             }
         }
@@ -155,52 +167,11 @@ bool Flash::writeBlock(
         return false;
     }
 
-    // Is there free space?
-    if (false == mlFreePages.empty()) {
-        // Perform write into free space.
-        uint32_t uTargetAddress(mlFreePages.front());
-        mlFreePages.pop_front();
-
-        // Allocate space as 32-bit and recast to 32-bit align
-        uint uWords(kPageSize / sizeof(uint32_t)); 
-        uint32_t *pData32(new uint32_t[uWords]);
-        uint8_t *pData8((uint8_t *)pData32);
-
-        // Create RAM data to write
-        _BlockHeader cHeader;
-        cHeader.muBlockMagic = kBlockMagic;
-        cHeader.muUserSignature = uSignature;
-        cHeader.muBlockBytes = uSize;
-        memset(pData8, 0x00, kPageSize);
-        memcpy(pData8, &cHeader, sizeof(_BlockHeader));
-        memcpy(&pData8[sizeof(_BlockHeader)], pBlock, uSize);
-
-        // Interrupt and core-safe write
-        {   _ScopedProtectFlash cSafe(pfCore1EntryPoint);
-            flash_range_program(uTargetAddress, pData8, kPageSize);
-        }
-        delete []pData32;
-
-        // Update block tracking
-        bool bFound(false);
-        for(std::list<Flash::_BlockType>::iterator cIter = mlKnownBlocks.begin(); cIter != mlKnownBlocks.end(); ++cIter) {
-            if ((*cIter).muSignature == uSignature) {
-                bFound = true;
-                (*cIter).muAddress = uTargetAddress;
-                (*cIter).muSize = uSize;
-                break;
-            }
-        }
-        if (false == bFound) {
-            Flash::_BlockType cNew(uSignature, uTargetAddress, uSize);
-            mlKnownBlocks.push_back(cNew);
-        }
-        
-        return true;
-
-    } else {
+    // Is there a free page available?
+    if (true == mlFreePages.empty()) {
         // Garbage collect! - erase all sectors not containing any 'good' blocks
         // and add to the free list.
+        printf("GC: No free pages\r\n");
         
         // Make array of erasable sectors
         bool *pbErasableSectors(new bool[muSectors]);
@@ -234,8 +205,67 @@ bool Flash::writeBlock(
         if (true == mlFreePages.empty()) {
             return false;
         }
-
-        // We now have free space - tail recurse
-        return writeBlock(uSignature, pBlock, uSize, pfCore1EntryPoint);
     }
+
+    // Determine generation of block
+    uint32_t uGeneration(0);
+    std::list<_BlockType>::iterator cBlockIterator(mlKnownBlocks.begin());
+    for(; cBlockIterator != mlKnownBlocks.end(); ++cBlockIterator) {
+        if ((*cBlockIterator).muSignature == uSignature) {
+            uGeneration = ((*cBlockIterator).muGeneration + 1);
+            break;
+        }
+    }
+
+    printf("Preparing to write %d byte block generation %d\r\n", uSize, uGeneration);
+
+    // Perform write into free space.
+    uint32_t uTargetAddress(mlFreePages.front());
+    mlFreePages.pop_front();
+
+    printf("Have write target address 0x%08x\r\n", uTargetAddress);
+
+    // Allocate space as 32-bit and recast to 32-bit align
+    uint uWords(kPageSize / sizeof(uint32_t)); 
+    uint32_t *pData32(new uint32_t[uWords]);
+    uint8_t *pData8((uint8_t *)pData32);
+
+    // Create RAM data to write
+    _BlockHeader cHeader;
+    cHeader.muBlockMagic = kBlockMagic;
+    cHeader.muUserSignature = uSignature;
+    cHeader.muBlockBytes = uSize;
+    memset(pData8, 0x00, kPageSize);
+    memcpy(pData8, &cHeader, sizeof(_BlockHeader));
+    memcpy(&pData8[sizeof(_BlockHeader)], pBlock, uSize);
+
+    printf("Created write block 0x%08x, 0x%08x, %d bytes\r\n", uTargetAddress, pData8, kPageSize);
+    // Interrupt and core-safe write
+    {   _ScopedProtectFlash cSafe(pfCore1EntryPoint);
+        flash_range_program(uTargetAddress-XIP_BASE, pData8, kPageSize);
+        printf("Well...?\r\n");
+    }
+    delete []pData32;
+
+    printf("Write completed\r\n");
+
+    // Update block tracking
+    bool bFound(false);
+    for(std::list<Flash::_BlockType>::iterator cIter = mlKnownBlocks.begin(); cIter != mlKnownBlocks.end(); ++cIter) {
+        if ((*cIter).muSignature == uSignature) {
+            bFound = true;
+            (*cIter).muAddress = uTargetAddress;
+            (*cIter).muGeneration = uGeneration;
+            (*cIter).muSize = uSize;
+            break;
+        }
+    }
+    if (false == bFound) {
+        Flash::_BlockType cNew(uSignature, uTargetAddress, uSize, uGeneration);
+        mlKnownBlocks.push_back(cNew);
+    }
+
+    printf("Complete - mlKnownBlocks size is now %d\r\n", mlKnownBlocks.size());
+    
+    return true;
 }

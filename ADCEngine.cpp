@@ -13,13 +13,15 @@
 //*****************************************************************************
 #include "ADCEngine.h"
 #include <math.h>
+#include <cstdio>
+#include <cstring>
+#include "pico/stdlib.h"
 #include "pico/sync.h"
 #include "hardware/gpio.h"
 #include "hardware/adc.h"
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include "utilities.h"
-#include <cstdio>
 
 volatile uint guADCLine = 0;
 
@@ -133,7 +135,9 @@ ADCEngine::ADCEngine(
     float fBufferTimeSec, uint uFrames) :
     mpSignalListHead(nullptr), mpSignalListTail(nullptr),
     mpFreeListHead(nullptr), mpDMAFrame(nullptr),
-    mbIsValid(false), mbIsRunning(false) {
+    mbIsValid(false), mbIsRunning(false),
+    mpCaptureBuffer(nullptr), muCaptureBufferSize(0), 
+    muCaptureBufferWriteIndex(0), muCaptureBufferReadIndex(0) {
  guADCLine = __LINE__;
     // Singleton protection and self-pointer (static)
     if (mspSelf != nullptr) {
@@ -325,6 +329,14 @@ bool ADCEngine::processFrame(Consumer &cConsumer) {
         return false;
     }
 
+    // If a capture buffer has been set up - fill it
+    if ((mpCaptureBuffer != nullptr) && (muCaptureBufferWriteIndex < muCaptureBufferSize)) {
+        uint32_t uBufferRemaining(muCaptureBufferSize - muCaptureBufferWriteIndex);
+        uint32_t uCopySize((pFrame->muCount > uBufferRemaining)?uBufferRemaining:pFrame->muCount);
+        memcpy(&mpCaptureBuffer[muCaptureBufferWriteIndex], pFrame->mpSamples, uCopySize);
+        muCaptureBufferWriteIndex += uCopySize;
+    }
+
     // Consumer now has exclusive access to frame
     //printf("Calling Consumer.process\r\n");
     cConsumer.process(*pFrame);
@@ -336,4 +348,47 @@ bool ADCEngine::processFrame(Consumer &cConsumer) {
     }
 
     return true;
+}
+
+/// Trigger capture of a time sequence
+bool ADCEngine::startCapture(uint32_t uTotalSamples) {
+    if (mpCaptureBuffer != nullptr) {
+        return false;
+    }
+
+    mpCaptureBuffer = new uint8_t[uTotalSamples];
+    if (mpCaptureBuffer == nullptr) {
+        return false;
+    }
+
+    // Capture buffer is ready
+    muCaptureBufferSize = uTotalSamples;
+    muCaptureBufferReadIndex = muCaptureBufferWriteIndex = 0;
+    return true;
+}
+
+/// Report previously captured samples (returns nullptr once exhausted)
+const uint8_t *ADCEngine::getNextSamples(uint32_t &uFirstSampleNumber, uint32_t &uRequestedCount) {
+    if (nullptr == mpCaptureBuffer) {
+        return nullptr;
+    }
+    if (muCaptureBufferWriteIndex < muCaptureBufferSize) {
+        return nullptr; // Still filling
+    }
+
+    uint32_t uAvailable(muCaptureBufferSize - muCaptureBufferReadIndex);
+    if (0 == uAvailable) {
+        // Buffer is exhausted. Reset first time we notice.
+        if (mpCaptureBuffer != nullptr) {
+            delete []mpCaptureBuffer; mpCaptureBuffer = nullptr;
+            muCaptureBufferSize = muCaptureBufferReadIndex = muCaptureBufferWriteIndex = 0;
+        }
+        return nullptr;
+    }
+
+    // Buffer has data - prepare the return information
+    uFirstSampleNumber = muCaptureBufferReadIndex;
+    uRequestedCount = (uRequestedCount > uAvailable)?uAvailable:uRequestedCount;
+    muCaptureBufferReadIndex += uRequestedCount;
+    return &mpCaptureBuffer[uFirstSampleNumber];
 }

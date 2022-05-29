@@ -39,17 +39,18 @@ class Flash {
             public:
                 uint32_t muSignature;
                 uint32_t muAddress;
+                uint32_t muGeneration;
                 uint8_t muSize;
 
-                _BlockType(uint32_t uSignature, uint32_t uOffset, uint8_t uSize);
+                _BlockType(uint32_t uSignature, uint32_t uOffset, uint8_t uSize, uint32_t muGeneration);
                 _BlockType &operator=(const _BlockType &cOther);
         };
         std::list<_BlockType> mlKnownBlocks;
         std::list<uint32_t> mlFreePages;
 
     public:
-        /// Initialize flash singleton. Sets up all internal pointers.
-        Flash(uint32_t uBase = 1 * kM, uint32_t uSectors = kDefaultSectors);
+        /// Initialize flash singleton at top of flash. Sets up all internal pointers.
+        Flash(uint32_t uSectors = kDefaultSectors);
 
         /// Destructor - included for form
         ~Flash();

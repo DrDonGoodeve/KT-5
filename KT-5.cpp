@@ -172,6 +172,7 @@ typedef enum {
     kServoPos,       // set servo position
     kServoTime,      // set servo min and max pulse
     kServoRate,      // set servo tracking rate
+    kReportADC,      // report captured data
     kSave,           // save settings to flash
     kResetFlash,     // reset flash
     kRestart         // Force restart
@@ -194,6 +195,7 @@ static const struct {
     {"spos", kServoPos, 1, "<posn> - set servo auto tracking off and move to posn"},
     {"stime", kServoTime, 2, "<min> <max> servo pulse in units of 10us - add 300us"},
     {"srate", kServoRate, 1, "<rate> - set servo tracking rate (1-255)"},
+    {"radc", kReportADC, 1, "<centisec> - report centisec of ADC samples"},
     {"save", kSave, 0, "- save all settings to flash"},
     {"rsf", kResetFlash, 2, "92 113 - if codes are entered correctly, erase flash"},
     {"rs", kRestart, 0, "- restart KT-5"}
@@ -304,8 +306,12 @@ class _Command {
 
 // Blocking loop - launch on core 1
 //-------------------------------------
+static bool sbFirstRun = true;
 static void _commandProcessor(void) {
-    printf("KT-5 " kVersion " running\r\n(waiting for command...)\r\n");
+    if (true == sbFirstRun) {
+        sbFirstRun = false;
+        printf("KT-5 " kVersion " running\r\n(waiting for command...)\r\n");
+    }
     
     while(true) {
         std::string sInput;
@@ -433,6 +439,16 @@ guKT5Line = __LINE__;
         gpio_put(PICO_DEFAULT_LED_PIN, (true == bAliveLEDOn)?0:1);
         bAliveLEDOn = !bAliveLEDOn;
 
+        // Report any captured data
+        uint32_t uFirstIndex(0), uActualSamples(5);
+        const uint8_t *pData(cADC.getNextSamples(uFirstIndex, uActualSamples));
+        if (pData != nullptr) {
+            for(uint32_t i=0; i<uActualSamples; i++) {
+                printf("%d, %d\r\n", uFirstIndex+i, pData[i]);
+            }
+            continue;
+        }
+
         // Process any command received
 guKT5Line = __LINE__;
         _Command cCommand;
@@ -503,6 +519,15 @@ guKT5Line = __LINE__;
                     printf("Saving all current settings to flash\r\n");
                     bool bSuccess(cFlash.writeBlock(kKT5SettingsSignature, (const uint8_t*)&scSettings, sizeof(scSettings), _commandProcessor));
                     printf("\t%s\r\n", (true==bSuccess)?"Ok":"Failed");
+                    break;
+                }
+                case kReportADC: {
+                    uint32_t uSamples((uint32_t)roundf(((float)cCommand.muData1 * 1.0e-2f) * kSampleRateHz));
+                    if (true == cADC.startCapture(uSamples)) {
+                        printf("Capturing %d ADC samples - report when complete\r\n", uSamples);
+                    } else {
+                        printf("ADC capture of %d samples rejected.\r\n\ttoo large or capture in process\r\n", uSamples);
+                    }
                     break;
                 }
                 case kResetFlash: {

@@ -83,6 +83,13 @@ class ADCEngine {
         Frame *mpFreeListHead;           // Head of free list (LIFO)
         Frame *mpDMAFrame;               // Current DMA target frame
 
+        // Support for capture buffer reporting
+        uint8_t *mpCaptureBuffer;
+        uint32_t muCaptureBufferSize;
+        uint32_t muCaptureBufferWriteIndex;
+        uint32_t muCaptureBufferReadIndex;
+
+        // Class singleton access
         friend void _dmaIRQHandler(void);  // Has access to this class
         static ADCEngine *mspSelf;         // Singleton pointer
 
@@ -117,6 +124,12 @@ class ADCEngine {
         /// Attach a consumer to process the next frame. If no frame is available,
         /// returns 'false' and cConsumer::process will not be called.
         bool processFrame(Consumer &cConsumer);
+
+        /// Trigger capture of a time sequence
+        bool startCapture(uint32_t uTotalSamples);
+
+        /// Report previously captured samples (returns nullptr once exhausted)
+        const uint8_t *getNextSamples(uint32_t &uFirstSampleNumber, uint32_t &uRequestedCount);
 };
 
 #endif // _ADCENGINE_
