@@ -374,7 +374,7 @@ int main(void) {
     guKT5Line = __LINE__;
     float fMinPulse(((float)scSettings.muServoMin * 10.0e-6f) + 300.0e-6f);
     float fMaxPulse(((float)scSettings.muServoMax * 10.0e-6f) + 300.0e-6f);
-    printf("min = %.6f, max = %.6f\r\n", fMinPulse, fMaxPulse);
+    printf("Servo timing (%.0fus, %.0fus)\r\n", (fMinPulse*1.0e6f), (fMaxPulse*1.0e6f));
     Servo cDial(kDialServoGPIO, 1.0f, false, fMinPulse, fMaxPulse);
     cDial.setRate(scSettings.muServoRate);
     sleep_ms(400);
@@ -386,8 +386,8 @@ int main(void) {
     uint8_t uSize(0);
     const uint8_t *pFlashSettings(cFlash.readBlock(kKT5SettingsSignature, uSize));
     if ((pFlashSettings != nullptr) && (uSize == sizeof(scSettings))) {
-        printf("DEBUG: Found correct size structure\r\n");
         memcpy((void*)&scSettings, pFlashSettings, sizeof(scSettings));
+        printf("Loaded saved settings from flash...\r\n");
     }
 
     // Alive LED
@@ -516,7 +516,7 @@ guKT5Line = __LINE__;
                     break;
                 }
                 case kSave: {
-                    printf("Saving all current settings to flash\r\n");
+                    printf("Saving all current settings to flash - ");
                     bool bSuccess(cFlash.writeBlock(kKT5SettingsSignature, (const uint8_t*)&scSettings, sizeof(scSettings), _commandProcessor));
                     printf("\t%s\r\n", (true==bSuccess)?"Ok":"Failed");
                     break;
@@ -531,7 +531,7 @@ guKT5Line = __LINE__;
                     break;
                 }
                 case kResetFlash: {
-                    if ((cCommand.muData1 == 91) && (cCommand.muData2 == 113)) {
+                    if ((cCommand.muData1 == 92) && (cCommand.muData2 == 113)) {
                         printf("Erasing flash\r\n");
                         cFlash.eraseAndReset(_commandProcessor);
                         printf("\terase complete\r\n");

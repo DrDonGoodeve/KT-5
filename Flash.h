@@ -21,7 +21,7 @@
 //-----------------------------------------------------------------------------
 #define kK                  (1024)
 #define kM                  (kK * kK)
-#define kDefaultSectors     (2)
+#define kDefaultSectors     (4)
 
 
 // Flash class

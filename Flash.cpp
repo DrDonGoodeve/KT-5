@@ -46,6 +46,7 @@ Flash::_BlockType &Flash::_BlockType::operator=(const Flash::_BlockType &cOther)
     muSignature = cOther.muSignature;
     muAddress = cOther.muAddress;
     muSize = cOther.muSize;
+    muGeneration = cOther.muGeneration;
     return *this;
 }
 
@@ -56,11 +57,11 @@ Flash::Flash(uint32_t uSectors) :
     // Populate the list of known blocks. Run up from muBaseAddress by pages looking for valid
     // signatures. Higher address blocks supercede those found at lower addresses.
     uint32_t uTop(muBaseAddress + (kSectorSize * muSectors));
-    printf("FLASH muBaseAddress = 0x%08x, muTop = 0x%08x\r\n", muBaseAddress, uTop);
+    printf("Flash Base:0x%08x, Top:0x%08x\r\n", muBaseAddress, uTop);
     for(uint32_t uAddress = muBaseAddress; uAddress < uTop; uAddress += kPageSize) {
-        printf("Reading page at 0x%08x\r\n", uAddress);
+        //printf("Reading page at 0x%08x\r\n", uAddress);
         const uint8_t *pRd((const uint8_t *)uAddress);
-        _BlockHeader cHeader = {0x0, 0x0, 0x0};
+        _BlockHeader cHeader = {0x0, 0x0, 0x0, 0x0};
         memcpy(&cHeader, pRd, sizeof(cHeader));
         if (cHeader.muBlockMagic == kBlockMagic) {
             // Found valid block - populate into list
@@ -73,20 +74,24 @@ Flash::Flash(uint32_t uSectors) :
                     bFound = true;
                     if (cBlock.muGeneration >= (*cIter).muGeneration) {
                         (*cIter) = cBlock;
+                        printf("Replaced signature 0x%08x with generation %d\r\n", (*cIter).muSignature, (*cIter).muGeneration);
+                    } else {
+                        printf("Ignored older 0x%08x block at generation %d\r\n", cBlock.muSignature, cBlock.muGeneration);
                     }
-                    break;
                 }
             }
             if (false == bFound) {
                 // Not seen this signature before - insert into list
+                printf("Unknown signature 0x%08x at generation %d\r\n", cBlock.muSignature, cBlock.muGeneration);
                 mlKnownBlocks.push_back(cBlock);
-                printf("Known blocks now has %d entries\r\n", mlKnownBlocks.size());
+                //printf("Known blocks now has %d entries\r\n", mlKnownBlocks.size());
             }
         } else {
             mlFreePages.push_back(uAddress);
-            printf("Now have %d free pages\r\n", mlFreePages.size());
+            //printf("Now have %d free pages\r\n", mlFreePages.size());
         }
     }
+    printf("flash: %d blocks, %d pages free\r\n", mlKnownBlocks.size(), mlFreePages.size());
 }
 
 Flash::~Flash() {
@@ -124,7 +129,7 @@ const uint8_t *Flash::readBlock(uint32_t uSignature, uint8_t &uSize) {
     for(std::list<Flash::_BlockType>::iterator cIter = mlKnownBlocks.begin(); cIter != mlKnownBlocks.end(); ++cIter) {
         if ((*cIter).muSignature == uSignature) {
             uSize = (*cIter).muSize;
-            return (const uint8_t*)((*cIter).muAddress);
+            return (const uint8_t*)((*cIter).muAddress + sizeof(_BlockHeader));
         }
     }
     return nullptr;
@@ -143,14 +148,11 @@ class _ScopedProtectFlash {
     public:
         _ScopedProtectFlash(void (*pfCore1EntryPoint)(void) = nullptr) :
             mpfCore1EntryPoint(pfCore1EntryPoint) {
-            printf("Scoped protect enter with entrypoint 0x%08x\r\n", mpfCore1EntryPoint);
             muInterruptEnables = save_and_disable_interrupts();
             multicore_reset_core1();
-            printf("Scoped protect active\r\n");
         }
 
         ~_ScopedProtectFlash() {
-            printf("Exit scoped protect\r\n");
             restore_interrupts(muInterruptEnables);
             if (mpfCore1EntryPoint != nullptr) {
                 multicore_launch_core1(mpfCore1EntryPoint);
@@ -176,12 +178,13 @@ bool Flash::writeBlock(
         // Make array of erasable sectors
         bool *pbErasableSectors(new bool[muSectors]);
         for(uint i=0; i<muSectors; i++) {
-            pbErasableSectors[i] = false;
+            pbErasableSectors[i] = true;
         }
+        // Cannot erase any sector with live content
         for(std::list<Flash::_BlockType>::const_iterator cIter = mlKnownBlocks.begin(); cIter != mlKnownBlocks.end(); ++cIter) {
             uint32_t uSectorBase((*cIter).muAddress & (~(kSectorSize-1)));  // Knock out all but sector base address
             uint uSector((uSectorBase - muBaseAddress) / kSectorSize);
-            pbErasableSectors[uSector] = true;
+            pbErasableSectors[uSector] = false;
         }
 
         // Erase all the erasable sectors and add the resulting free sectors to the free list
@@ -189,19 +192,21 @@ bool Flash::writeBlock(
             for(uint i=0; i<muSectors; i++) {
                 if (true == pbErasableSectors[i]) {
                     uint32_t uSectorBase(muBaseAddress + (i * kSectorSize));
-                    flash_range_erase(uSectorBase, kSectorSize);
+                    printf("Erasing garbage sector at 0x%08x\r\n", uSectorBase);
+                    flash_range_erase(uSectorBase-XIP_BASE, kSectorSize);
                     for(uint j=0; j<(kSectorSize/kPageSize); j++) {
                         uint32_t uPageBase(uSectorBase + (j * kPageSize));
                         mlFreePages.push_back(uPageBase);
                     }
                 }
-            }        
+            }
         }
         delete []pbErasableSectors; pbErasableSectors = nullptr;
 
         // If free list remains empty - we are stuck without a page-moving
         // garbage collection. With more sectors than block types this will
         // never happen.
+        printf("flash: now have %d free pages\r\n", mlFreePages.size());
         if (true == mlFreePages.empty()) {
             return false;
         }
@@ -217,13 +222,13 @@ bool Flash::writeBlock(
         }
     }
 
-    printf("Preparing to write %d byte block generation %d\r\n", uSize, uGeneration);
+    //printf("Preparing to write %d byte block generation %d\r\n", uSize, uGeneration);
 
     // Perform write into free space.
     uint32_t uTargetAddress(mlFreePages.front());
     mlFreePages.pop_front();
 
-    printf("Have write target address 0x%08x\r\n", uTargetAddress);
+    //printf("Have write target address 0x%08x\r\n", uTargetAddress);
 
     // Allocate space as 32-bit and recast to 32-bit align
     uint uWords(kPageSize / sizeof(uint32_t)); 
@@ -235,19 +240,20 @@ bool Flash::writeBlock(
     cHeader.muBlockMagic = kBlockMagic;
     cHeader.muUserSignature = uSignature;
     cHeader.muBlockBytes = uSize;
+    cHeader.muGeneration = uGeneration;
     memset(pData8, 0x00, kPageSize);
     memcpy(pData8, &cHeader, sizeof(_BlockHeader));
     memcpy(&pData8[sizeof(_BlockHeader)], pBlock, uSize);
 
-    printf("Created write block 0x%08x, 0x%08x, %d bytes\r\n", uTargetAddress, pData8, kPageSize);
+    printf("Writing block 0x%08x at generation %d\r\n", cHeader.muUserSignature, cHeader.muGeneration);
     // Interrupt and core-safe write
     {   _ScopedProtectFlash cSafe(pfCore1EntryPoint);
         flash_range_program(uTargetAddress-XIP_BASE, pData8, kPageSize);
-        printf("Well...?\r\n");
+        //printf("Well...?\r\n");
     }
     delete []pData32;
 
-    printf("Write completed\r\n");
+    //printf("Write completed\r\n");
 
     // Update block tracking
     bool bFound(false);
@@ -265,7 +271,7 @@ bool Flash::writeBlock(
         mlKnownBlocks.push_back(cNew);
     }
 
-    printf("Complete - mlKnownBlocks size is now %d\r\n", mlKnownBlocks.size());
+    //printf("Complete - mlKnownBlocks size is now %d\r\n", mlKnownBlocks.size());
     
     return true;
 }
