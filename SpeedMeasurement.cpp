@@ -19,6 +19,10 @@
 #include "SpeedMeasurement.h"
 #include "pico/stdlib.h"
 
+// Macros
+//*****************************************************************************
+#define TC(time,srate)    (powf(10.0f, (log10f(0.632f)/(srate*time))))
+
 
 // Local functions
 //*****************************************************************************
@@ -44,9 +48,12 @@ bool _integrationCallback(repeating_timer_t *pTimer) {
 // Implementation of SpeedMeasurement class.
 //-----------------------------------------------------------------------------
 SpeedMeasurement::SpeedMeasurement(float fSampleRateHz) :
-    mfSampleRateHz(fSampleRateHz), muRawMeasurement(0), 
+    mfSampleRateHz(fSampleRateHz), mbResetAll(true),
     mfIntegratedSpeedKts(0.0f), mfCurrentSpeedKts(0.0f), 
     mfDistanceTravelledNm(0.0f), muElapsedTimeSec(0) {
+
+    // Initialize everything to defaults
+    setConstants();
 
     // Start 1 second timer (integration mechanism)
     add_repeating_timer_ms(1000, _integrationCallback, (void*)this, &mcTimer);
@@ -58,26 +65,170 @@ SpeedMeasurement::~SpeedMeasurement() {
     cancel_repeating_timer(&mcTimer);
 }
 
+void SpeedMeasurement::setConstants(
+    float fPPSToKts, float fPulseMagnitudeToKts,
+    float fPeakDecayTC, float fAvgFilterTC,
+    float fEdgeThreshold, float fEdgeHysteresis,
+    float fPPSAvgConstant, EMethod eMethod) {
+
+    mfPPSToKts = fPPSToKts;
+    mfPulseMagnitudeToKts = fPulseMagnitudeToKts;
+    mfPeakDecayTC = fPeakDecayTC;
+    mfAvgFilterTC = fAvgFilterTC;
+    mfEdgeThresholdProportion = fEdgeThreshold;
+    mfEdgeHysteresis = fEdgeHysteresis;
+    mfPPSAvgConst = fPPSAvgConstant;
+    meMethod = eMethod;
+}
+
+void SpeedMeasurement::setPPSToKts(float fPPSToKts) {
+    mfPPSToKts = fPPSToKts;
+}
+
+void SpeedMeasurement::setPulseMagnitudeToKts(float fPulseMagnitudeToKts) {
+    mfPulseMagnitudeToKts = fPulseMagnitudeToKts;
+}
+
+void SpeedMeasurement::setPeakDecayTC(float fPeakDecayTC) {
+    mfPeakDecayTC = fPeakDecayTC;
+}
+
+void SpeedMeasurement::setAvgFilterTC(float fAvgFilterTC) {
+    mfAvgFilterTC = fAvgFilterTC;
+}
+
+void SpeedMeasurement::setEdgeThreshold(float fEdgeThreshold) {
+    mfEdgeThresholdProportion = fEdgeThreshold;
+}
+
+void SpeedMeasurement::setEdgeHysteresis(float fEdgeHysteresis) {
+    mfEdgeHysteresis = fEdgeHysteresis;
+}
+
+void SpeedMeasurement::setPPSAvgConst(float fPPSAvgConstant) {
+    mfPPSAvgConst = fPPSAvgConstant;
+}
+
+void SpeedMeasurement::setMethod(SpeedMeasurement::EMethod eMethod) {
+    meMethod = eMethod;
+}
+
 /// ADCEngine::Consumer method
 void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
-    // Simple processing - take peak value and make FSD 8kts
     uint8_t *pData(cFrame.mpSamples);
     uint uCount(cFrame.muCount);
-    //printf("SpeedMeasurement::process pData=0x%08x, uCount=%d\r\n", pData, uCount);
-    uint8_t uMax(0);
-    for(uint i=0; i<uCount; i++) {
-        uint8_t uValue(*(pData++));
-        uMax = (uValue>uMax)?uValue:uMax;
-    }
-    muRawMeasurement = uMax;
 
-    //printf("Process frame uMax = %d\r\n", uMax);
-    mfCurrentSpeedKts = ((float)uMax / 255.0f) * 8.0f;
+    if (true == mbResetAll) {
+        mbResetAll = false;
+        mfMax = mfMin = mfAvg = (float)(*pData);
+        mfAvgPulsesPerSecond = 0.0f;
+        muSampleCount = 0;
+        muLastRisingTrigger = muLastFallingTrigger = 0;
+    }
+
+    // Determine and apply peak detector measurement decay constants (per frame)
+    float fFrameTime((float)uCount / mfSampleRateHz);
+    float fSampleTime(1.0f / mfSampleRateHz);
+    float fPeakDecay(TC(mfPeakDecayTC, fFrameTime));
+    float fAvgWeight(TC(mfAvgFilterTC, fSampleTime));
+    mfMax = mfAvg + ((mfMax-mfAvg)*fPeakDecay);
+    mfMin = mfAvg - ((mfAvg-mfMax)*fPeakDecay);
+
+    // Determine thresholds
+    float fMaxAboveAvg(mfMax - mfAvg), fMinBelowAvg(mfAvg - mfMin);
+    float fHighThreshold((fMaxAboveAvg * mfEdgeThresholdProportion) + mfAvg);
+    float fHighReleaseThreshold((fMaxAboveAvg * (mfEdgeThresholdProportion * (1.0f - mfEdgeHysteresis))) + mfAvg);
+    float fLowThreshold(mfAvg - (fMinBelowAvg * mfEdgeThresholdProportion));
+    float fLowReleaseThreshold(mfAvg - (fMinBelowAvg * (mfEdgeThresholdProportion * (1.0f - mfEdgeHysteresis))));
+
+    // Loop over measurement state machine
+    for(uint i=0; i<uCount; i++) {
+        // Abbreviations
+        uint8_t &uSample(*(pData++));
+        float fSample((float)uSample);
+        uint uSampleNumber(muSampleCount+i);
+
+        // Per-sample calculations
+        mfMax = (fSample > mfMax)?fSample:mfMax;
+        mfMin = (fSample < mfMin)?fSample:mfMin;
+        mfAvg = (fSample * fAvgWeight) + (mfAvg * (1.0f - fAvgWeight));
+
+        // Edge-detector logic (state machine)
+        switch(meSignalState) {
+            case kUndefinedSignal:
+                if (fSample >= fHighThreshold) {
+                    meSignalState = kInPositivePulse;
+                    if (muLastRisingTrigger != 0) {
+                        uint uBetweenRisingEdges(uSampleNumber - muLastRisingTrigger);
+                        float fRisingPPS(mfSampleRateHz / (float)uBetweenRisingEdges);
+                        if (0.0f == mfAvgPulsesPerSecond) {
+                            mfAvgPulsesPerSecond = fRisingPPS;
+                        } else {
+                            mfAvgPulsesPerSecond = ((fRisingPPS * mfPPSAvgConst) + ((1.0f - mfPPSAvgConst) * mfAvgPulsesPerSecond));
+                        }
+                    }
+                    muLastRisingTrigger = uSampleNumber;
+
+                } else if (fSample <= fLowThreshold) {
+                    meSignalState = kInNegativePulse;
+                    if (muLastRisingTrigger != 0) {
+                        uint uBetweenFallingEdges(uSampleNumber - muLastFallingTrigger);
+                        float fFallingPPS(mfSampleRateHz / (float)uBetweenFallingEdges);
+                        if (0.0f == mfAvgPulsesPerSecond) {
+                            mfAvgPulsesPerSecond = fFallingPPS;
+                        } else {
+                            mfAvgPulsesPerSecond = ((fFallingPPS * mfPPSAvgConst) + ((1.0f - mfPPSAvgConst) * mfAvgPulsesPerSecond));
+                        }
+                    }
+                    muLastFallingTrigger = uSampleNumber;
+                }
+                break;
+
+            case kInPositivePulse:
+                if (fSample <= fHighReleaseThreshold) {
+                    meSignalState = kUndefinedSignal;
+                }
+                break;
+            case kInNegativePulse:
+                if (fSample >= fLowReleaseThreshold) {
+                    meSignalState = kUndefinedSignal;
+                }
+                break;
+        }
+        pData++;
+    }
+    muSampleCount += uCount;
+
+    // End of frame - update all measurements
+    // I now have updated/filtered values of mfMax, mfMin, mfAvg, mfAvgPulsesPerSecond
+    switch(meMethod) {
+        case kPulseMethod:
+            mfCurrentSpeedKts = mfPPSToKts * mfAvgPulsesPerSecond;
+            break;
+        case kRangeMethod:
+            mfCurrentSpeedKts = mfPulseMagnitudeToKts * (mfMax-mfMin);
+            break;
+        case kHybridMethod: default:
+            mfCurrentSpeedKts = (0.5f * (mfPPSToKts * mfAvgPulsesPerSecond)) + (0.5f * (mfPulseMagnitudeToKts * (mfMax-mfMin)));
+            break;
+    }
 }
 
 /// Parameter reporting
-uint8_t SpeedMeasurement::getRaw(void) const {
-    return muRawMeasurement;
+static const char *_methodToString(const SpeedMeasurement::EMethod &eMethod) {
+    switch(eMethod) {
+        case SpeedMeasurement::kPulseMethod: return "pulse";
+        case SpeedMeasurement::kRangeMethod: return "range";
+        case SpeedMeasurement::kHybridMethod: return "hybrid";
+        default: return "undefined";
+    }
+}
+
+void SpeedMeasurement::reportState(void) const {
+    printf("\tsignal (min:%.2f, avg:%.2f, max:.2f)\r\n", mfMin, mfAvg, mfMax);
+    printf("\tavg PPS: %.2f\r\n", mfAvgPulsesPerSecond);
+    printf("\tmeasurement method: %s", _methodToString(meMethod));
+    printf("\tcurrent speed kts: %.3f\r\n", mfCurrentSpeedKts);
 }
 
 float SpeedMeasurement::getSpeedKts(void) const {

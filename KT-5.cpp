@@ -30,6 +30,7 @@
 #include "OLED.h"
 #include "HC-05.h"
 #include "Flash.h"
+#include "Float16.h"
 
 
 // Defines
@@ -163,7 +164,7 @@ typedef enum {
     kIgnore,         // Ignore the command
     kHelp,           // Help command
     kDiag,           // Display diagnostics
-    kInput,          // Report raw input
+    kMeasure,        // Report from transducer signal processing
     kReportKts,      // Report input map to kts
     kSetKtsVal,      // <kts> <input> set kts map to input
     kReportServoKts, // Report servo posn map to kts
@@ -186,7 +187,7 @@ static const struct {
 }spCommands[] = {
     {"?", kHelp, 0, "- show help and diagnostics"},
     {"d", kDiag, 0, "- display diagnostic information"},
-    {"raw", kInput, 0, "- display current raw transducer signal"},
+    {"tdu", kMeasure, 0, "- display signal measurements"},
     {"kts", kReportKts, 0, "- show mappings of kts to raw transducer signal"},
     {"setkts", kSetKtsVal, 2, "<kts> <raw> - set mapping from raw value to kts"},
     {"serkts", kReportServoKts, 0, "- show mappings of kts to servo posn"},
@@ -454,8 +455,9 @@ guKT5Line = __LINE__;
         _Command cCommand;
         if (true == _getCommand(cCommand)) {
             switch(cCommand.muOpCode) {
-                case kInput: 
-                    printf("Raw reading = %d\r\n", cMeasure.getRaw()); 
+                case kMeasure: 
+                    printf("Transducer signal processing:\r\n");
+                    cMeasure.reportState();
                     break;
                 case kReportKts:
                     printf("Input/kts mappings:\r\n");

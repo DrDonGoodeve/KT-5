@@ -21,12 +21,30 @@
 #include "ADCEngine.h"
 #include "pico/stdlib.h"
 
+// Defines
+//-----------------------------------------------------------------------------
+#define kDefaultPPSToKts        (5.0f)
+#define kDefaultPulseMagToKts   ((2.0f * 0.97f) / 5.0f)
+#define kDefaultPeakDecayTC     (5.0f)
+#define kDefaultAvgFilterTC     (5.0f)
+#define kDefaultEdgeThreshold   (0.67f)
+#define kDefaultEdgeHysteresis  (0.2f)
+#define kDefaultPPSAvgConstant  (0.05f)
+
 
 // SpeedMeasurement class
 /// Primary function is to estimate speed from the transducer signal. Creates
 /// derived measurements.
 //-----------------------------------------------------------------------------
 class SpeedMeasurement : public ADCEngine::Consumer {
+    public:
+            // Measurement method to use to obtain current speed and all derived measurements
+        typedef enum {
+            kPulseMethod = 0,
+            kRangeMethod = 1,
+            kHybridMethod = 2
+        }EMethod;
+
     private:
         friend bool _integrationCallback(repeating_timer_t *);
 
@@ -34,12 +52,46 @@ class SpeedMeasurement : public ADCEngine::Consumer {
 
         repeating_timer_t mcTimer;  // Required for integration mechanism
 
-        uint8_t muRawMeasurement;   // Current raw measurement
-        float mfCurrentSpeedKts;    // Computed current speed
-        uint muElapsedTimeSec;      // Time since start
-        float mfDistanceTravelledNm;
+        // Edge detector mechanism
+        bool mbResetAll;    // Reset everything on first sample
+        float mfMax;        // Max signal decayed at mfPeakDecayRate per sample to mfAvg
+        float mfMin;        // Min signal decayed at mfPeakDecayRate per sample to mfAvg
+        float mfPeakDecayTC;    // Time constant for mfMax and mfMin to decay to mfAvg
 
-        float mfIntegratedSpeedKts;
+        float mfAvg;            // Average signal filtered at mfAvgFilterRate
+        float mfAvgFilterTC;    // Time constant for filtering average signal
+
+        typedef enum {
+            kUndefinedSignal,
+            kInPositivePulse,
+            kInNegativePulse
+        }ESignalState;
+
+        ESignalState meSignalState;     // Current signal state (machine)
+        uint32_t muLastRisingTrigger;   // Sample at last rising trigger
+        uint32_t muLastFallingTrigger;  // Sample at last falling trigger 
+        uint32_t muSampleCount;         // Tracking current sample number (start of latest frame)
+
+        float mfEdgeThresholdProportion;  // Proportion of peak for threshold
+        float mfEdgeHysteresis;           // Proportion of peak for edge hysteresis
+
+        // Derived measurements
+        float mfPPSAvgConst;            // Contribution to running average of a new PPS measurement
+        float mfAvgPulsesPerSecond;     // Pulses per second - measured/filtered
+        float mfMeasurementDecayTC;     // Per-sample decay time constant for pulse measurements
+
+        // Conversion constants
+        float mfPPSToKts;
+        float mfPulseMagnitudeToKts;
+
+        // Measurement method
+        EMethod meMethod;
+
+        // Derived measurements
+        float mfCurrentSpeedKts;        // Computed current speed
+        uint32_t muElapsedTimeSec;          // Time since start
+        float mfDistanceTravelledNm;    // Integrated distance travelled
+        float mfIntegratedSpeedKts;     // Integrated speed - divide by time for avg speed
 
     public:
         /// Initialize the class and set accumulated time to zero.
@@ -48,11 +100,34 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         /// Destructor - switches off PWM and deallocates the GPIO
         ~SpeedMeasurement();
 
+        // Set all control constants
+        void setConstants(
+            float fPPSToKts = kDefaultPPSToKts,
+            float fPulseMagnitudeToKts = kDefaultPulseMagToKts,
+            float fPeakDecayTC=kDefaultPeakDecayTC,
+            float fAvgFilterTC=kDefaultAvgFilterTC,
+            float fEdgeThreshold=kDefaultEdgeThreshold,
+            float fEdgeHysteresis=kDefaultEdgeHysteresis,
+            float fPPSAvgConst=kDefaultPPSAvgConstant,
+            EMethod eMethod=kPulseMethod
+        );
+
+        void setPPSToKts(float fPPSToKts);
+        void setPulseMagnitudeToKts(float fPulseMagnitudeToKts);
+        void setPeakDecayTC(float fPeakDecayTC);
+        void setAvgFilterTC(float fAvgFilterTC);
+        void setEdgeThreshold(float fEdgeThreshold);
+        void setEdgeHysteresis(float fEdgeHysteresis);
+        void setPPSAvgConst(float fPPSAvgConstant);
+        void setMethod(SpeedMeasurement::EMethod eMethod);
+
         /// ADCEngine::Consumer method
         virtual void process(const ADCEngine::Frame &cFrame);
 
         /// Parameter reporting
-        uint8_t getRaw(void) const;
+        void reportState(void) const;       // Report all current state to stdout
+
+        // Derived measurement reporting
         float getSpeedKts(void) const;
         float getAvgSpeedKts(void) const;
         float getSecondsElapsed(void) const;
