@@ -29,6 +29,7 @@
 #define kDefaultAvgFilterTC     (5.0f)
 #define kDefaultEdgeThreshold   (0.67f)
 #define kDefaultEdgeHysteresis  (0.2f)
+#define kMinimumPulseMagnitude  (10)
 #define kDefaultPPSAvgConstant  (0.05f)
 
 
@@ -74,6 +75,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
 
         float mfEdgeThresholdProportion;  // Proportion of peak for threshold
         float mfEdgeHysteresis;           // Proportion of peak for edge hysteresis
+        uint8_t muMinimumPulseMagnitude;    // Less than this min/max is considered noise and ignored
 
         // Derived measurements
         float mfPPSAvgConst;            // Contribution to running average of a new PPS measurement
@@ -89,7 +91,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
 
         // Derived measurements
         float mfCurrentSpeedKts;        // Computed current speed
-        uint32_t muElapsedTimeSec;          // Time since start
+        uint32_t muElapsedTimeSec;      // Time since start
         float mfDistanceTravelledNm;    // Integrated distance travelled
         float mfIntegratedSpeedKts;     // Integrated speed - divide by time for avg speed
 
@@ -108,6 +110,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
             float fAvgFilterTC=kDefaultAvgFilterTC,
             float fEdgeThreshold=kDefaultEdgeThreshold,
             float fEdgeHysteresis=kDefaultEdgeHysteresis,
+            uint8_t uMinimumMagnitude=kMinimumPulseMagnitude,
             float fPPSAvgConst=kDefaultPPSAvgConstant,
             EMethod eMethod=kPulseMethod
         );
@@ -118,6 +121,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         void setAvgFilterTC(float fAvgFilterTC);
         void setEdgeThreshold(float fEdgeThreshold);
         void setEdgeHysteresis(float fEdgeHysteresis);
+        void setMinimumPulseMagnitude(uint8_t uMinimumMagnitude);
         void setPPSAvgConst(float fPPSAvgConstant);
         void setMethod(SpeedMeasurement::EMethod eMethod);
 
@@ -125,7 +129,8 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         virtual void process(const ADCEngine::Frame &cFrame);
 
         /// Parameter reporting
-        void reportState(void) const;       // Report all current state to stdout
+        void reportParameters(void) const;          // Report all programmed parameters
+        void reportDynamicState(void) const;        // Report all current state to stdout
 
         // Derived measurement reporting
         float getSpeedKts(void) const;

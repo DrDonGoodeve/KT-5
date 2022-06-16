@@ -37,7 +37,7 @@
 //*****************************************************************************
 // Application information
 #define kAppName                "KT-5"
-#define kVersion                "B.8"
+#define kVersion                "B.9"
 #define kAppInfo1               "@(4,16,-6)" kAppName
 #define kSlidePrefix            "@(2,%d,32)"
 #define kSlideAppInfo2          kSlidePrefix "reloaded..."
@@ -63,7 +63,7 @@
 
 // Settings information
 #define kKtsPositions   (9)
-#define kSettingsMagic  (0x5e771235)
+#define kSettingsMagic  (0x5e771236)
 
 
 // Local types
@@ -101,18 +101,34 @@ class Settings {
     public:
         uint32_t muMagic;                           // Magic number
         uint8_t mpServoKts[kKtsPositions];          // Map integer kts to servo position
-        uint8_t mpKtsForReading[kKtsPositions];     // Map reading to kts
         uint8_t muServoRate;                        // Servo tracking rate (default 30)
         uint8_t muServoMin;                         // In 100s of us minus 300 (default 18 for 480us)
         uint8_t muServoMax;                         // In 100s of us minus 300 (default 235 for 2650us)
+        float mfPPSToKts;                           // Speed measurement constants
+        float mfPulseMagnitudeToKts;
+        float mfPeakDecayTC;
+        float mfAvgFilterTC;
+        float mfEdgeThreshold;
+        float mfEdgeHysteresis;
+        uint8_t muMinimumMagnitude;
+        float mfPPSAvgConst;
+        SpeedMeasurement::EMethod meMeasurementMethod;
 }scSettings = {
     kSettingsMagic,
     {0, 1*(256/8), 2*(256/8), 3*(256/8), 4*(256/8), 5*(256/8), 6*(256/8), 7*(256/8), 255},
-    {0, 1*(256/8), 2*(256/8), 3*(256/8), 4*(256/8), 5*(256/8), 6*(256/8), 7*(256/8), 255},
     kDefaultServoRate,
     kDefaultServoMin,
-    kDefaultServoMax
-};
+    kDefaultServoMax,
+    kDefaultPPSToKts,
+    kDefaultPulseMagToKts,
+    kDefaultPeakDecayTC,
+    kDefaultAvgFilterTC,
+    kDefaultEdgeThreshold,
+    kDefaultEdgeHysteresis,
+    kMinimumPulseMagnitude,
+    kDefaultPPSAvgConstant,
+    SpeedMeasurement::EMethod::kPulseMethod
+ };
 
 // The servo is not centered on the dial - and hence to get the digits lining
 // up correctly a correction needs to be applied. This function maps a speed
@@ -121,11 +137,6 @@ class Settings {
 // deflection for servo. Hull speed is around 6.2 knots...)
 //-----------------------------------------------------------------------------
 static float _getServoPosnForKts(float fKts) {
-    //static const float pfPosn[] = {	// Remapping table
-    ////	0kts	1kt	    2kts	3kts	4kts	5kts	6kts	7kts	8kts
-    //    0.0f, 	0.17f, 	0.32f, 	0.435f,	0.58f,	0.70f, 	0.83f,	0.93f,	1.0f
-    //};
-
     // Constrain kts parameter to be in valid range
     fKts = ((fKts < 0.0f)?0.0f:(fKts > 8.0f)?8.0f:fKts);
 
@@ -160,13 +171,21 @@ guKT5Line = __LINE__;
 // (non-blocking) by the main loop via _getCommand.
 //-----------------------------------------------------------------------------
 typedef enum {
-    kNoOp,           // Null operation
-    kIgnore,         // Ignore the command
-    kHelp,           // Help command
-    kDiag,           // Display diagnostics
-    kMeasure,        // Report from transducer signal processing
-    kReportKts,      // Report input map to kts
-    kSetKtsVal,      // <kts> <input> set kts map to input
+    kNoOp,          // Null operation
+    kIgnore,        // Ignore the command
+    kHelp,          // Help command
+    kDiag,          // Display diagnostics
+    kMeasure,       // Report from transducer signal processing
+    kParameters,    // Report all transducer signal processing parameters
+    kSetPPSToKts,   // Set conversion factor from Pulses-per-second to Kts
+    kSetPulseMagToKts,  // Set conversion factor from pulse max/min to Kts
+    kSetPeakDecayTC,    // Set peak decay time constant in seconds
+    kSetAvgFilterTC,    // Set average filtering time constant in seconds
+    kSetEdgeThreshold,  // Set edge threshold as a proportion of peak level vs. avg
+    kSetEdgeHysteresis, // Set hysteresis for edge detector as a proportion of threshold
+    kSetMinPulseMagnitude,  // Pulses below this magnitude are not measured
+    kSetPPSAveragingConstant,   // Proportion of each new measurement to contribute to tracking value
+    kSetMeasurementMethod,      // Set measurement method 0-pulse, 1-range, 2-hybrid
     kReportServoKts, // Report servo posn map to kts
     kSetServoKts,    // <kts> <posn> set kts map to posn
     kServoOn,        // servo response on
@@ -188,8 +207,16 @@ static const struct {
     {"?", kHelp, 0, "- show help and diagnostics"},
     {"d", kDiag, 0, "- display diagnostic information"},
     {"tdu", kMeasure, 0, "- display signal measurements"},
-    {"kts", kReportKts, 0, "- show mappings of kts to raw transducer signal"},
-    {"setkts", kSetKtsVal, 2, "<kts> <raw> - set mapping from raw value to kts"},
+    {"tpa", kParameters, 0, "- report all transducer processing parameters"},
+    {"pps2kts", kSetPPSToKts, 3, "- set conversion factor from Pulses-per-second to Kts"},
+    {"pmag2kts", kSetPulseMagToKts, 3, "- set conversion factor from pulse max/min to Kts"},
+    {"pktc", kSetPeakDecayTC, 3, "- set peak decay time constant in seconds"},
+    {"avtc", kSetAvgFilterTC, 3, "- set average filtering time constant in seconds"},
+    {"edth", kSetEdgeThreshold, 3, "- set edge threshold (of peak/avg)"},
+    {"edhy", kSetEdgeHysteresis, 3, "- set hysteresis (of threshold)"},
+    {"minmag", kSetMinPulseMagnitude, 3, "- min pulse magnitude"},
+    {"ppsac", kSetPPSAveragingConstant, 3, "- set new measurement contribution"},
+    {"mmeth", kSetMeasurementMethod, 1, "- set method 0-pulse, 1-range, 2-hybrid"},
     {"serkts", kReportServoKts, 0, "- show mappings of kts to servo posn"},
     {"setsp", kSetServoKts, 2, "<kts> <posn> - set mapping of kts to servo posn"},
     {"sauto", kServoOn, 0, "- switch servo to auto (default)"},
@@ -218,42 +245,61 @@ class _Command {
         _Command(const std::string &sInput) :
             muOpCode(kNoOp), muData1(0x0), muData2(0x0) {
 
+            // Decompose sInput into sTag, sArgss
             std::string sTag(sInput);
             size_t iSpace(sInput.find(" "));
-            int iArgs(0);
-            if (iSpace != std::string::npos) {
-                sTag = sInput.substr(0, iSpace);
-                std::string sArgs(sInput.substr(iSpace+1));
-                iSpace = sArgs.find(" ");
-                if (std::string::npos == iSpace) {
-                    muData1 = stoi(sArgs);
-                    iArgs = 1;
-                    //printf("sArg1 = %s\r\n", sArgs.c_str());
-                } else {
-                    std::string sArg1(sArgs.substr(0, iSpace));
-                    std::string sArg2(sArgs.substr(iSpace+1));
-                    //printf("sArg1 = %s, sArg2 = %s\r\n", sArg1.c_str(), sArg2.c_str());
-                    muData1 = stoi(sArg1);
-                    muData2 = stoi(sArg2);
-                    iArgs = 2;
-                }
-            }
+            sTag = (iSpace != std::string::npos)?sInput.substr(0, iSpace):sTag;
+            std::string sArgs((iSpace != std::string::npos)?sInput.substr(iSpace+1):"");
 
-            trim(sTag);
             bool bFound(false);
+            uint uArgsExpected(0);
             for(uint i=0; i<_arraysize(spCommands); i++) {
                 if (0 == sTag.compare(spCommands[i].pTag)) {
                     bFound = true;
                     muOpCode = spCommands[i].eCode;
-                    if (iArgs != spCommands[i].uArgs) {
-                        printf("error: command '%s' takes %d arguments:\r\n\t%s\r\n", spCommands[i].pTag, spCommands[i].uArgs, spCommands[i].pInfo);
-                        muOpCode = kIgnore;
-                    }
+                    uArgsExpected = spCommands[i].uArgs;
                     break;
                 }
             }
             if (false == bFound) {
-                printf("Unknown command '%s'\r\n", sTag.c_str());
+                printf("ERROR: unknown command '%s'\r\n", sTag.c_str());
+                muOpCode = kIgnore;
+                return;
+            }
+
+            uint uArgNumber(0);
+            while(false == sArgs.empty()) {
+                // Set up iteration - split off sArg leaving sArgs as residue
+                size_t iArgSpace(sArgs.find(" "));
+                std::string sArg((iArgSpace != std::string::npos)?sArgs.substr(0, iArgSpace):sArgs);
+                uArgNumber++;
+
+                // Interpret sArg
+                if (uArgsExpected == 3) {   // Special value - denotes expected single floating point number
+                    float fNumber(stof(sArg));
+                    float16 f16(fNumber);
+                    f16.getBytes(muData1, muData2);
+                    break;
+                }
+
+                if (uArgNumber > uArgsExpected) {
+                    printf("ERROR: command %s only takes %d arguments - %s ignored.\r\n", sTag.c_str(), uArgsExpected, sArgs.c_str());
+                    muOpCode = kIgnore;
+                    break;
+                }
+
+                switch(uArgNumber) {
+                    case 1: muData1 = stoi(sArg); break;
+                    case 2: muData2 = stoi(sArg); break;
+                    default: break;
+                }
+
+                // Prepare for next iteration
+                sArgs= ((iArgSpace != std::string::npos)?sArgs.substr(iArgSpace+1):"");
+            }
+            if ((3 == uArgsExpected) && (0 == uArgNumber)) {
+                printf("ERROR: floating point argument expected for command %s.\r\n", sTag.c_str());
+                muOpCode = kIgnore;
                 return;
             }
 
@@ -270,6 +316,7 @@ class _Command {
                 case kRestart:
                     muOpCode = kIgnore;
                     printf("Restarting...");
+                    sleep_ms(100);
                     watchdog_enable(1, 1);
                     while(true) {
                     }
@@ -453,26 +500,76 @@ guKT5Line = __LINE__;
         // Process any command received
 guKT5Line = __LINE__;
         _Command cCommand;
+        float16 f16(cCommand.muData1, cCommand.muData2);
+        float fArg(f16.getFloat32());
         if (true == _getCommand(cCommand)) {
             switch(cCommand.muOpCode) {
                 case kMeasure: 
                     printf("Transducer signal processing:\r\n");
-                    cMeasure.reportState();
+                    cMeasure.reportDynamicState();
                     break;
-                case kReportKts:
-                    printf("Input/kts mappings:\r\n");
-                    for(uint i=0; i<kKtsPositions; i++) {
-                        printf("%s%dkts=%d", (0==i)?"":", ", i, scSettings.mpKtsForReading[i]);
-                    }
-                    printf("\r\n");
+
+                case kParameters:
+                    printf("Transducer processing parameters:\r\n");
+                    cMeasure.reportParameters();
                     break;
-                case kSetKtsVal:
-                    if (cCommand.muData1 > 8) {
-                        printf("Kts value %d out of range (0-8)\r\n", cCommand.muData1);
-                        break;
+
+                case kSetPPSToKts:
+                    scSettings.mfPPSToKts = fArg;
+                    cMeasure.setPPSToKts(fArg);
+                    printf("PPS to Kts = %.3f\r\n", fArg);
+                    break;
+
+                case kSetPulseMagToKts:
+                    scSettings.mfPulseMagnitudeToKts = fArg;
+                    cMeasure.setPulseMagnitudeToKts(fArg);
+                    printf("Pulse magnitude to Kts = %.3f\r\n", fArg);
+                    break;
+                
+                case kSetPeakDecayTC:
+                    scSettings.mfPeakDecayTC = fArg;
+                    cMeasure.setPeakDecayTC(fArg);
+                    printf("Peak Decay Time constant = %.2fsec\r\n", fArg);
+                    break;
+                                    
+                case kSetAvgFilterTC:
+                    scSettings.mfAvgFilterTC = fArg;
+                    cMeasure.setAvgFilterTC(fArg);
+                    printf("Average filter time constant = %.sfsec\r\n", fArg);
+                    break;
+                
+                case kSetEdgeThreshold:
+                    scSettings.mfEdgeThreshold = fArg;
+                    cMeasure.setEdgeThreshold(fArg);
+                    printf("Edge threshold = %.3f\r\n", fArg);
+                    break;                                    
+                    
+                case kSetEdgeHysteresis:
+                    scSettings.mfEdgeHysteresis = fArg;
+                    cMeasure.setEdgeHysteresis(fArg);
+                    printf("Edge hysteresis = %.3f\r\n", fArg);
+                    break;
+                
+                case kSetMinPulseMagnitude:
+                    scSettings.muMinimumMagnitude = cCommand.muData1;
+                    cMeasure.setMinimumPulseMagnitude(cCommand.muData1);
+                    printf("Minumum pulse magnitude = %d\r\n", cCommand.muData1);
+                    break;
+                                                        
+                case kSetPPSAveragingConstant:
+                    scSettings.mfPPSAvgConst = fArg;
+                    cMeasure.setPPSAvgConst(fArg);
+                    printf("PPS averaging constant = %.3f\r\n", fArg);
+                    break;
+                
+                case kSetMeasurementMethod:
+                    if (cCommand.muData1 > 2) {
+                        printf("ERROR: Invalid measurement method %d\r\n", cCommand.muData1);
+                    } else {
+                        scSettings.meMeasurementMethod = (SpeedMeasurement::EMethod)cCommand.muData1;
+                        cMeasure.setMethod(scSettings.meMeasurementMethod);
+                        printf("Measurement method %d\r\n", cCommand.muData1);
                     }
-                    scSettings.mpKtsForReading[cCommand.muData1] = cCommand.muData2;
-                    printf("%dkts map to raw reading %d\r\n", cCommand.muData1, cCommand.muData2);
                     break;
 
                 case kReportServoKts:
@@ -482,6 +579,7 @@ guKT5Line = __LINE__;
                     }
                     printf("\r\n");
                     break;
+
                 case kSetServoKts:
                     if (cCommand.muData1 > 8) {
                         printf("Kts value %d out of range (0-8)\r\n", cCommand.muData1);
@@ -490,16 +588,18 @@ guKT5Line = __LINE__;
                     scSettings.mpServoKts[cCommand.muData1] = cCommand.muData2;
                     printf("%dkts map to servo position %d\r\n", cCommand.muData1, cCommand.muData2);
                     break;
-                case kServoRate: {
+
+                case kServoRate: 
                     scSettings.muServoRate = cCommand.muData1;
                     printf("servo rate %d\r\n", scSettings.muServoRate); 
                     cDial.setRate(scSettings.muServoRate);
                     break;
-                }
+                
                 case kServoOn: 
                     printf("servo AUTO\r\n"); 
                     bServoAuto = true; 
                     break;
+
                 case kServoPos: {
                     uint8_t uPosn(cCommand.muData1);
                     bServoAuto = false;
@@ -508,6 +608,7 @@ guKT5Line = __LINE__;
                     cDial.setPosition(fPosn);
                     break;
                 }
+
                 case kServoTime: {
                     scSettings.muServoMin = cCommand.muData1;
                     scSettings.muServoMax = cCommand.muData2;
@@ -517,12 +618,14 @@ guKT5Line = __LINE__;
                     cDial.setPulseLengths(fMinPulse, fMaxPulse);
                     break;
                 }
+
                 case kSave: {
                     printf("Saving all current settings to flash - ");
                     bool bSuccess(cFlash.writeBlock(kKT5SettingsSignature, (const uint8_t*)&scSettings, sizeof(scSettings), _commandProcessor));
                     printf("\t%s\r\n", (true==bSuccess)?"Ok":"Failed");
                     break;
                 }
+
                 case kReportADC: {
                     uint32_t uSamples((uint32_t)roundf(((float)cCommand.muData1 * 1.0e-2f) * kSampleRateHz));
                     if (true == cADC.startCapture(uSamples)) {
@@ -532,6 +635,7 @@ guKT5Line = __LINE__;
                     }
                     break;
                 }
+
                 case kResetFlash: {
                     if ((cCommand.muData1 == 92) && (cCommand.muData2 == 113)) {
                         printf("Erasing flash\r\n");
@@ -542,6 +646,7 @@ guKT5Line = __LINE__;
                     }
                     break;
                 }
+
                 default:
                     printf("Command %d, a1:%d, a2:%d\r\n", cCommand.muOpCode, cCommand.muData1, cCommand.muData2);
                     break;

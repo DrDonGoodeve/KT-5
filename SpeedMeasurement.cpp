@@ -69,7 +69,8 @@ void SpeedMeasurement::setConstants(
     float fPPSToKts, float fPulseMagnitudeToKts,
     float fPeakDecayTC, float fAvgFilterTC,
     float fEdgeThreshold, float fEdgeHysteresis,
-    float fPPSAvgConstant, EMethod eMethod) {
+    uint8_t uMinimumMagnitude, float fPPSAvgConstant,
+    EMethod eMethod) {
 
     mfPPSToKts = fPPSToKts;
     mfPulseMagnitudeToKts = fPulseMagnitudeToKts;
@@ -77,6 +78,7 @@ void SpeedMeasurement::setConstants(
     mfAvgFilterTC = fAvgFilterTC;
     mfEdgeThresholdProportion = fEdgeThreshold;
     mfEdgeHysteresis = fEdgeHysteresis;
+    muMinimumPulseMagnitude = uMinimumMagnitude;
     mfPPSAvgConst = fPPSAvgConstant;
     meMethod = eMethod;
 }
@@ -107,6 +109,10 @@ void SpeedMeasurement::setEdgeHysteresis(float fEdgeHysteresis) {
 
 void SpeedMeasurement::setPPSAvgConst(float fPPSAvgConstant) {
     mfPPSAvgConst = fPPSAvgConstant;
+}
+
+void SpeedMeasurement::setMinimumPulseMagnitude(uint8_t uMinimumMagnitude) {
+    muMinimumPulseMagnitude = uMinimumMagnitude;
 }
 
 void SpeedMeasurement::setMethod(SpeedMeasurement::EMethod eMethod) {
@@ -154,8 +160,12 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
         mfAvg = (fSample * fAvgWeight) + (mfAvg * (1.0f - fAvgWeight));
 
         // Edge-detector logic (state machine)
+        bool bPulsesValid((mfMax-mfMin) >= (float)muMinimumPulseMagnitude);
         switch(meSignalState) {
             case kUndefinedSignal:
+                if (false == bPulsesValid) {
+                    break;
+                }
                 if (fSample >= fHighThreshold) {
                     meSignalState = kInPositivePulse;
                     if (muLastRisingTrigger != 0) {
@@ -224,11 +234,21 @@ static const char *_methodToString(const SpeedMeasurement::EMethod &eMethod) {
     }
 }
 
-void SpeedMeasurement::reportState(void) const {
-    printf("\tsignal (min:%.2f, avg:%.2f, max:.2f)\r\n", mfMin, mfAvg, mfMax);
-    printf("\tavg PPS: %.2f\r\n", mfAvgPulsesPerSecond);
+void SpeedMeasurement::reportParameters(void) const {
+    printf("\tPPS to Kts = %.2f\r\n", mfPPSToKts);
+    printf("\tPulse Magnitude to Kts = %.2f\r\n", mfPulseMagnitudeToKts);
+    printf("\tPeak decay time constant = %.2f\r\n", mfPeakDecayTC);
+    printf("\tAverage filter time constant = %.2f\r\n", mfAvgFilterTC);
+    printf("\tEdge threshold (of peak) = %.3f, hysteresis (of threshold) = %.3f\r\n", mfEdgeThresholdProportion, mfEdgeHysteresis);
+    printf("\tMinimum pulse magnitude (counts) = %d\r\n", muMinimumPulseMagnitude);
+    printf("\tPPS averaging constant = %.2f\r\n", mfPPSAvgConst);
     printf("\tmeasurement method: %s", _methodToString(meMethod));
-    printf("\tcurrent speed kts: %.3f\r\n", mfCurrentSpeedKts);
+}
+
+void SpeedMeasurement::reportDynamicState(void) const {
+    printf("\tSignal (min:%.2f, avg:%.2f, max:.2f)\r\n", mfMin, mfAvg, mfMax);
+    printf("\tAvg PPS: %.2f\r\n", mfAvgPulsesPerSecond);
+    printf("\tCurrent speed kts: %.3f\r\n", mfCurrentSpeedKts);
 }
 
 float SpeedMeasurement::getSpeedKts(void) const {
