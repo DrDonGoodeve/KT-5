@@ -38,16 +38,16 @@ class ADCEngine {
         // Simple transparent data class
          class Frame {
             public:
-                uint muSequence;    // Out-of-sequence implies discontinuity... 
-                uint8_t *mpSamples; // Data
-                uint muCount;       // Number of elements in mpSamples
-                Frame *mpNext;      // Next frame in this list/stack
+                uint32_t muSequence;    // Out-of-sequence implies discontinuity... 
+                uint8_t *mpSamples;		// Data
+                uint32_t muCount;       // Number of elements in mpSamples
+                Frame *mpNext;			// Next frame in this list/stack
 
                 Frame(void) :
                     muSequence(0), mpSamples(nullptr), muCount(0), mpNext(nullptr) {      
                 }
 
-                Frame(uint uCount) : 
+                Frame(uint32_t uCount) : 
                     muSequence(0), mpSamples(new uint8_t[uCount]), muCount(uCount), mpNext(nullptr) {
                 }
 

@@ -18,17 +18,17 @@
 
 // Includes
 //-----------------------------------------------------------------------------
-#include "ADCEngine.h"
-#include "pico/stdlib.h"
+//#include "ADCEngine.h"
+//#include "pico/stdlib.h"
 
 // Defines
 //-----------------------------------------------------------------------------
-#define kDefaultPPSToKts        (5.0f)
+#define kDefaultPPSToKts        (0.2f)
 #define kDefaultPulseMagToKts   ((2.0f * 0.97f) / 5.0f)
 #define kDefaultPeakDecayTC     (5.0f)
 #define kDefaultAvgFilterTC     (5.0f)
 #define kDefaultEdgeThreshold   (0.67f)
-#define kDefaultEdgeHysteresis  (0.2f)
+#define kDefaultEdgeHysteresis  (0.5f)
 #define kMinimumPulseMagnitude  (10)
 #define kDefaultPPSAvgConstant  (0.05f)
 
@@ -75,7 +75,8 @@ class SpeedMeasurement : public ADCEngine::Consumer {
 
         float mfEdgeThresholdProportion;  // Proportion of peak for threshold
         float mfEdgeHysteresis;           // Proportion of peak for edge hysteresis
-        uint8_t muMinimumPulseMagnitude;    // Less than this min/max is considered noise and ignored
+        uint8_t muMinimumPulseMagnitude;  // Less than this min/max is considered noise and ignored
+		uint32_t muPulseCount;			  // Number of pulses detected since run start
 
         // Derived measurements
         float mfPPSAvgConst;            // Contribution to running average of a new PPS measurement

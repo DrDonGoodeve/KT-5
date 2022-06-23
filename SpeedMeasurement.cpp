@@ -17,11 +17,10 @@
 #include <stdio.h>
 #include <math.h>
 #include "SpeedMeasurement.h"
-#include "pico/stdlib.h"
 
 // Macros
 //*****************************************************************************
-#define TC(time,srate)    (powf(10.0f, (log10f(0.632f)/(srate*time))))
+#define TC(time,oprate)    (powf(10.0f, (log10f(0.632f)/(time * oprate))))
 
 
 // Local functions
@@ -122,23 +121,24 @@ void SpeedMeasurement::setMethod(SpeedMeasurement::EMethod eMethod) {
 /// ADCEngine::Consumer method
 void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
     uint8_t *pData(cFrame.mpSamples);
-    uint uCount(cFrame.muCount);
+    uint32_t uCount(cFrame.muCount);
 
     if (true == mbResetAll) {
         mbResetAll = false;
+		meSignalState = kUndefinedSignal;
         mfMax = mfMin = mfAvg = (float)(*pData);
         mfAvgPulsesPerSecond = 0.0f;
         muSampleCount = 0;
+		muPulseCount = 0;
         muLastRisingTrigger = muLastFallingTrigger = 0;
     }
 
     // Determine and apply peak detector measurement decay constants (per frame)
-    float fFrameTime((float)uCount / mfSampleRateHz);
-    float fSampleTime(1.0f / mfSampleRateHz);
-    float fPeakDecay(TC(mfPeakDecayTC, fFrameTime));
-    float fAvgWeight(TC(mfAvgFilterTC, fSampleTime));
+	float fFrameRate(mfSampleRateHz / (float)uCount);
+    float fPeakDecay(TC(mfPeakDecayTC, fFrameRate));
+    float fAvgFilter(TC(mfAvgFilterTC, fFrameRate));
     mfMax = mfAvg + ((mfMax-mfAvg)*fPeakDecay);
-    mfMin = mfAvg - ((mfAvg-mfMax)*fPeakDecay);
+    mfMin = mfAvg - ((mfAvg-mfMin)*fPeakDecay);
 
     // Determine thresholds
     float fMaxAboveAvg(mfMax - mfAvg), fMinBelowAvg(mfAvg - mfMin);
@@ -146,30 +146,31 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
     float fHighReleaseThreshold((fMaxAboveAvg * (mfEdgeThresholdProportion * (1.0f - mfEdgeHysteresis))) + mfAvg);
     float fLowThreshold(mfAvg - (fMinBelowAvg * mfEdgeThresholdProportion));
     float fLowReleaseThreshold(mfAvg - (fMinBelowAvg * (mfEdgeThresholdProportion * (1.0f - mfEdgeHysteresis))));
+    bool bPulsesValid((mfMax-mfMin) >= (float)muMinimumPulseMagnitude);
 
     // Loop over measurement state machine
-    for(uint i=0; i<uCount; i++) {
+	float fSum(0.0f);
+    for(uint32_t i=0; i<uCount; i++) {
         // Abbreviations
         uint8_t &uSample(*(pData++));
         float fSample((float)uSample);
-        uint uSampleNumber(muSampleCount+i);
+		fSum += fSample;
+        uint32_t uSampleNumber(muSampleCount+i);
 
         // Per-sample calculations
         mfMax = (fSample > mfMax)?fSample:mfMax;
         mfMin = (fSample < mfMin)?fSample:mfMin;
-        mfAvg = (fSample * fAvgWeight) + (mfAvg * (1.0f - fAvgWeight));
 
         // Edge-detector logic (state machine)
-        bool bPulsesValid((mfMax-mfMin) >= (float)muMinimumPulseMagnitude);
         switch(meSignalState) {
             case kUndefinedSignal:
                 if (false == bPulsesValid) {
                     break;
                 }
-                if (fSample >= fHighThreshold) {
+                if (fSample > fHighThreshold) {
                     meSignalState = kInPositivePulse;
                     if (muLastRisingTrigger != 0) {
-                        uint uBetweenRisingEdges(uSampleNumber - muLastRisingTrigger);
+                        uint32_t uBetweenRisingEdges(uSampleNumber - muLastRisingTrigger);
                         float fRisingPPS(mfSampleRateHz / (float)uBetweenRisingEdges);
                         if (0.0f == mfAvgPulsesPerSecond) {
                             mfAvgPulsesPerSecond = fRisingPPS;
@@ -179,10 +180,10 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
                     }
                     muLastRisingTrigger = uSampleNumber;
 
-                } else if (fSample <= fLowThreshold) {
+                } else if (fSample < fLowThreshold) {
                     meSignalState = kInNegativePulse;
-                    if (muLastRisingTrigger != 0) {
-                        uint uBetweenFallingEdges(uSampleNumber - muLastFallingTrigger);
+                    if (muLastFallingTrigger != 0) {
+                        uint32_t uBetweenFallingEdges(uSampleNumber - muLastFallingTrigger);
                         float fFallingPPS(mfSampleRateHz / (float)uBetweenFallingEdges);
                         if (0.0f == mfAvgPulsesPerSecond) {
                             mfAvgPulsesPerSecond = fFallingPPS;
@@ -195,19 +196,22 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
                 break;
 
             case kInPositivePulse:
-                if (fSample <= fHighReleaseThreshold) {
+                if (fSample < fHighReleaseThreshold) {
                     meSignalState = kUndefinedSignal;
+					muPulseCount++;
                 }
                 break;
             case kInNegativePulse:
-                if (fSample >= fLowReleaseThreshold) {
+                if (fSample > fLowReleaseThreshold) {
                     meSignalState = kUndefinedSignal;
+					muPulseCount++;
                 }
                 break;
         }
-        pData++;
     }
     muSampleCount += uCount;
+	float fFrameAverage(fSum / (float)uCount);
+	mfAvg = ((1.0f - fAvgFilter) * fFrameAverage) + (fAvgFilter * mfAvg);
 
     // End of frame - update all measurements
     // I now have updated/filtered values of mfMax, mfMin, mfAvg, mfAvgPulsesPerSecond
@@ -246,8 +250,9 @@ void SpeedMeasurement::reportParameters(void) const {
 }
 
 void SpeedMeasurement::reportDynamicState(void) const {
-    printf("\tSignal (min:%.2f, avg:%.2f, max:.2f)\r\n", mfMin, mfAvg, mfMax);
-    printf("\tAvg PPS: %.2f\r\n", mfAvgPulsesPerSecond);
+    printf("\tSignal (min:%.2f, avg:%.2f, max:%.2f)\r\n", mfMin, mfAvg, mfMax);
+	printf("\tSamples:%d, Pulses:%d\r\n", muSampleCount, muPulseCount);
+	printf("\tAvg PPS: %.2f\r\n", mfAvgPulsesPerSecond);
     printf("\tCurrent speed kts: %.3f\r\n", mfCurrentSpeedKts);
 }
 
