@@ -25,14 +25,15 @@
 
 // Defines
 //-----------------------------------------------------------------------------
-#define kDefaultPPSToKts        (0.2f)
-#define kDefaultPulseMagToKts   ((2.0f * 0.97f) / 5.0f)
+#define kDefaultPPSToKts        (5.0f / 7.852f)
+#define kDefaultPulseMagToKts   (5.0f / 4.560f)
 #define kDefaultPeakDecayTC     (5.0f)
 #define kDefaultAvgFilterTC     (5.0f)
 #define kDefaultEdgeThreshold   (0.67f)
 #define kDefaultEdgeHysteresis  (0.5f)
-#define kMinimumPulseMagnitude  (10)
-#define kDefaultPPSAvgConstant  (0.05f)
+#define kMinimumPulseMagnitude  (15)
+#define kDefaultNoiseThreshold  (5)
+#define kDefaultPPSAvgConstant  (0.2f)
 
 
 // SpeedMeasurement class
@@ -78,6 +79,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         float mfEdgeThresholdProportion;  // Proportion of peak for threshold
         float mfEdgeHysteresis;           // Proportion of peak for edge hysteresis
         uint8_t muMinimumPulseMagnitude;  // Less than this min/max is considered noise and ignored
+        uint8_t muNoiseThreshold;         // Subtracted from min/max to give actual peak-peak
 		uint32_t muPulseCount;			  // Number of pulses detected since run start
 
         // Derived measurements
@@ -111,17 +113,19 @@ class SpeedMeasurement : public ADCEngine::Consumer {
             float fPulseMagnitudeToKts = kDefaultPulseMagToKts,
             float fPeakDecayTC=kDefaultPeakDecayTC,
             float fAvgFilterTC=kDefaultAvgFilterTC,
+            uint8_t uNoiseThreshold=kDefaultNoiseThreshold,
             float fEdgeThreshold=kDefaultEdgeThreshold,
             float fEdgeHysteresis=kDefaultEdgeHysteresis,
             uint8_t uMinimumMagnitude=kMinimumPulseMagnitude,
             float fPPSAvgConst=kDefaultPPSAvgConstant,
-            EMethod eMethod=kPulseMethod
+            EMethod eMethod=kHybridMethod
         );
 
         void setPPSToKts(float fPPSToKts);
         void setPulseMagnitudeToKts(float fPulseMagnitudeToKts);
         void setPeakDecayTC(float fPeakDecayTC);
         void setAvgFilterTC(float fAvgFilterTC);
+        void setNoiseThreshold(uint8_t uNoiseThreshold);
         void setEdgeThreshold(float fEdgeThreshold);
         void setEdgeHysteresis(float fEdgeHysteresis);
         void setMinimumPulseMagnitude(uint8_t uMinimumMagnitude);

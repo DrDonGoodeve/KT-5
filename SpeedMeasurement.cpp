@@ -67,6 +67,7 @@ SpeedMeasurement::~SpeedMeasurement() {
 void SpeedMeasurement::setConstants(
     float fPPSToKts, float fPulseMagnitudeToKts,
     float fPeakDecayTC, float fAvgFilterTC,
+    uint8_t uNoiseThreshold,
     float fEdgeThreshold, float fEdgeHysteresis,
     uint8_t uMinimumMagnitude, float fPPSAvgConstant,
     EMethod eMethod) {
@@ -75,6 +76,7 @@ void SpeedMeasurement::setConstants(
     mfPulseMagnitudeToKts = fPulseMagnitudeToKts;
     mfPeakDecayTC = fPeakDecayTC;
     mfAvgFilterTC = fAvgFilterTC;
+    muNoiseThreshold = uNoiseThreshold;
     mfEdgeThresholdProportion = fEdgeThreshold;
     mfEdgeHysteresis = fEdgeHysteresis;
     muMinimumPulseMagnitude = uMinimumMagnitude;
@@ -96,6 +98,10 @@ void SpeedMeasurement::setPeakDecayTC(float fPeakDecayTC) {
 
 void SpeedMeasurement::setAvgFilterTC(float fAvgFilterTC) {
     mfAvgFilterTC = fAvgFilterTC;
+}
+
+void SpeedMeasurement::setNoiseThreshold(uint8_t uNoiseThreshold) {
+    muNoiseThreshold = uNoiseThreshold;
 }
 
 void SpeedMeasurement::setEdgeThreshold(float fEdgeThreshold) {
@@ -215,17 +221,22 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
 
     // End of frame - update all measurements
     // I now have updated/filtered values of mfMax, mfMin, mfAvg, mfAvgPulsesPerSecond
-    switch(meMethod) {
-        case kPulseMethod:
-            mfCurrentSpeedKts = mfPPSToKts * mfAvgPulsesPerSecond;
-            break;
-        case kRangeMethod:
-            mfCurrentSpeedKts = mfPulseMagnitudeToKts * (mfMax-mfMin);
-            break;
-        case kHybridMethod: default:
-            mfCurrentSpeedKts = (0.5f * (mfPPSToKts * mfAvgPulsesPerSecond)) + (0.5f * (mfPulseMagnitudeToKts * (mfMax-mfMin)));
-            break;
-    }
+	switch (meMethod) {
+		case kPulseMethod:
+			mfCurrentSpeedKts = mfPPSToKts * mfAvgPulsesPerSecond;
+			break;
+		case kRangeMethod:
+			mfCurrentSpeedKts = mfPulseMagnitudeToKts * (((mfMax - mfMin) > (float)muNoiseThreshold) ? (mfMax - mfMin) : 0.0f);
+			break;
+		case kHybridMethod: default:
+			if ((mfMax - mfMin) >= (0.9f * 255.0f)) {
+				mfCurrentSpeedKts = mfPPSToKts * mfAvgPulsesPerSecond;
+			}
+			else {
+				mfCurrentSpeedKts = (0.5f * (mfPPSToKts * mfAvgPulsesPerSecond)) + (0.5f * (mfPulseMagnitudeToKts * (mfMax - mfMin)));
+			}
+			break;
+		}
 }
 
 /// Parameter reporting
@@ -250,7 +261,7 @@ void SpeedMeasurement::reportParameters(void) const {
 }
 
 void SpeedMeasurement::reportDynamicState(void) const {
-    printf("\tSignal (min:%.2f, avg:%.2f, max:%.2f)\r\n", mfMin, mfAvg, mfMax);
+    printf("\tSignal (min:%.2f, avg:%.2f, max:%.2f, pk/pk:%.2f)\r\n", mfMin, mfAvg, mfMax, (mfMax-mfMin));
 	printf("\tSamples:%d, Pulses:%d\r\n", muSampleCount, muPulseCount);
 	printf("\tAvg PPS: %.2f\r\n", mfAvgPulsesPerSecond);
     printf("\tCurrent speed kts: %.3f\r\n", mfCurrentSpeedKts);

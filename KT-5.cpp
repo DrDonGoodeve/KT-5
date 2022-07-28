@@ -37,7 +37,7 @@
 //*****************************************************************************
 // Application information
 #define kAppName                "KT-5"
-#define kVersion                "B.9"
+#define kVersion                "1.0"
 #define kAppInfo1               "@(4,16,-6)" kAppName
 #define kSlidePrefix            "@(2,%d,32)"
 #define kSlideAppInfo2          kSlidePrefix "reloaded..."
@@ -110,8 +110,9 @@ class Settings {
         float mfAvgFilterTC;
         float mfEdgeThreshold;
         float mfEdgeHysteresis;
-        uint8_t muMinimumMagnitude;
         float mfPPSAvgConst;
+        uint8_t muMinimumMagnitude;
+        uint8_t muNoiseThreshold;
         SpeedMeasurement::EMethod meMeasurementMethod;
 }scSettings = {
     kSettingsMagic,
@@ -125,8 +126,9 @@ class Settings {
     kDefaultAvgFilterTC,
     kDefaultEdgeThreshold,
     kDefaultEdgeHysteresis,
-    kMinimumPulseMagnitude,
     kDefaultPPSAvgConstant,
+    kMinimumPulseMagnitude,
+    kDefaultNoiseThreshold,
     SpeedMeasurement::EMethod::kPulseMethod
  };
 
@@ -181,6 +183,7 @@ typedef enum {
     kSetPulseMagToKts,  // Set conversion factor from pulse max/min to Kts
     kSetPeakDecayTC,    // Set peak decay time constant in seconds
     kSetAvgFilterTC,    // Set average filtering time constant in seconds
+    kSetNoiseThreshold, // Set noise threshold (max-min) in counts
     kSetEdgeThreshold,  // Set edge threshold as a proportion of peak level vs. avg
     kSetEdgeHysteresis, // Set hysteresis for edge detector as a proportion of threshold
     kSetMinPulseMagnitude,  // Pulses below this magnitude are not measured
@@ -212,6 +215,7 @@ static const struct {
     {"pmag2kts", kSetPulseMagToKts, 3, "- set conversion factor from pulse max/min to Kts"},
     {"pktc", kSetPeakDecayTC, 3, "- set peak decay time constant in seconds"},
     {"avtc", kSetAvgFilterTC, 3, "- set average filtering time constant in seconds"},
+    {"nth", kSetNoiseThreshold, 1, "- set noise threshold (max-min) in counts"},
     {"edth", kSetEdgeThreshold, 3, "- set edge threshold (of peak/avg)"},
     {"edhy", kSetEdgeHysteresis, 3, "- set hysteresis (of threshold)"},
     {"minmag", kSetMinPulseMagnitude, 3, "- min pulse magnitude"},
@@ -536,6 +540,11 @@ guKT5Line = __LINE__;
                     scSettings.mfAvgFilterTC = fArg;
                     cMeasure.setAvgFilterTC(fArg);
                     printf("Average filter time constant = %.sfsec\r\n", fArg);
+                    break;
+
+                case kSetNoiseThreshold:
+                    scSettings.muNoiseThreshold = cCommand.muData1;
+                    printf("Noise threshold (max-min) = %d\r\n", cCommand.muData1);
                     break;
                 
                 case kSetEdgeThreshold:
