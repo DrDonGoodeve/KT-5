@@ -82,7 +82,7 @@ Flash::Flash(uint32_t uSectors) :
             }
             if (false == bFound) {
                 // Not seen this signature before - insert into list
-                printf("Unknown signature 0x%08x at generation %d\r\n", cBlock.muSignature, cBlock.muGeneration);
+                printf("First time signature 0x%08x at generation %d\r\n", cBlock.muSignature, cBlock.muGeneration);
                 mlKnownBlocks.push_back(cBlock);
                 //printf("Known blocks now has %d entries\r\n", mlKnownBlocks.size());
             }

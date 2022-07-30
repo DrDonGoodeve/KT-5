@@ -29,6 +29,7 @@
 #define kDefaultPulseMagToKts   (5.0f / 4.560f)
 #define kDefaultPeakDecayTC     (5.0f)
 #define kDefaultAvgFilterTC     (5.0f)
+#define kDefaultPPSFilterTC     (5.0f)
 #define kDefaultEdgeThreshold   (0.67f)
 #define kDefaultEdgeHysteresis  (0.5f)
 #define kMinimumPulseMagnitude  (15)
@@ -61,6 +62,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         float mfMax;        // Max signal decayed at mfPeakDecayRate per sample to mfAvg
         float mfMin;        // Min signal decayed at mfPeakDecayRate per sample to mfAvg
         float mfPeakDecayTC;    // Time constant for mfMax and mfMin to decay to mfAvg
+        float mfPPSFilterTC;    // Time constant for filtering PPS signal (to zero)
 
         float mfAvg;            // Average signal filtered at mfAvgFilterRate
         float mfAvgFilterTC;    // Time constant for filtering average signal
@@ -113,6 +115,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
             float fPulseMagnitudeToKts = kDefaultPulseMagToKts,
             float fPeakDecayTC=kDefaultPeakDecayTC,
             float fAvgFilterTC=kDefaultAvgFilterTC,
+            float fPPSFilterTC=kDefaultPPSFilterTC,
             uint8_t uNoiseThreshold=kDefaultNoiseThreshold,
             float fEdgeThreshold=kDefaultEdgeThreshold,
             float fEdgeHysteresis=kDefaultEdgeHysteresis,
@@ -125,6 +128,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         void setPulseMagnitudeToKts(float fPulseMagnitudeToKts);
         void setPeakDecayTC(float fPeakDecayTC);
         void setAvgFilterTC(float fAvgFilterTC);
+        void setPPSFilterTC(float fPPSFilterTC);
         void setNoiseThreshold(uint8_t uNoiseThreshold);
         void setEdgeThreshold(float fEdgeThreshold);
         void setEdgeHysteresis(float fEdgeHysteresis);

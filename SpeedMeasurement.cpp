@@ -66,7 +66,7 @@ SpeedMeasurement::~SpeedMeasurement() {
 
 void SpeedMeasurement::setConstants(
     float fPPSToKts, float fPulseMagnitudeToKts,
-    float fPeakDecayTC, float fAvgFilterTC,
+    float fPeakDecayTC, float fAvgFilterTC, float fPPSFilterTC,
     uint8_t uNoiseThreshold,
     float fEdgeThreshold, float fEdgeHysteresis,
     uint8_t uMinimumMagnitude, float fPPSAvgConstant,
@@ -76,6 +76,7 @@ void SpeedMeasurement::setConstants(
     mfPulseMagnitudeToKts = fPulseMagnitudeToKts;
     mfPeakDecayTC = fPeakDecayTC;
     mfAvgFilterTC = fAvgFilterTC;
+	mfPPSFilterTC = fPPSFilterTC;
     muNoiseThreshold = uNoiseThreshold;
     mfEdgeThresholdProportion = fEdgeThreshold;
     mfEdgeHysteresis = fEdgeHysteresis;
@@ -98,6 +99,10 @@ void SpeedMeasurement::setPeakDecayTC(float fPeakDecayTC) {
 
 void SpeedMeasurement::setAvgFilterTC(float fAvgFilterTC) {
     mfAvgFilterTC = fAvgFilterTC;
+}
+
+void SpeedMeasurement::setPPSFilterTC(float fPPSFilterTC) {
+    mfPPSFilterTC = fPPSFilterTC;
 }
 
 void SpeedMeasurement::setNoiseThreshold(uint8_t uNoiseThreshold) {
@@ -143,6 +148,7 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
 	float fFrameRate(mfSampleRateHz / (float)uCount);
     float fPeakDecay(TC(mfPeakDecayTC, fFrameRate));
     float fAvgFilter(TC(mfAvgFilterTC, fFrameRate));
+    float fPPSFilter(TC(mfPPSFilterTC, fFrameRate));
     mfMax = mfAvg + ((mfMax-mfAvg)*fPeakDecay);
     mfMin = mfAvg - ((mfAvg-mfMin)*fPeakDecay);
 
@@ -218,22 +224,27 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
     muSampleCount += uCount;
 	float fFrameAverage(fSum / (float)uCount);
 	mfAvg = ((1.0f - fAvgFilter) * fFrameAverage) + (fAvgFilter * mfAvg);
+    mfAvgPulsesPerSecond *= fPPSFilter;
 
     // End of frame - update all measurements
     // I now have updated/filtered values of mfMax, mfMin, mfAvg, mfAvgPulsesPerSecond
+    float fPeakCounts((((mfMax - mfMin) > (float)muNoiseThreshold) ? (mfMax - mfMin) : 0.0f));
+    float fPeakPeakVolts(fPeakCounts * kADCResolutionVolts);
+    float fPeakBasedSpeed(mfPulseMagnitudeToKts * fPeakPeakVolts);
+    float fPPSBasedSpeed(mfPPSToKts * mfAvgPulsesPerSecond);
 	switch (meMethod) {
 		case kPulseMethod:
-			mfCurrentSpeedKts = mfPPSToKts * mfAvgPulsesPerSecond;
+			mfCurrentSpeedKts = fPPSBasedSpeed;
 			break;
 		case kRangeMethod:
-			mfCurrentSpeedKts = mfPulseMagnitudeToKts * (((mfMax - mfMin) > (float)muNoiseThreshold) ? (mfMax - mfMin) : 0.0f);
+			mfCurrentSpeedKts = fPeakBasedSpeed;
 			break;
 		case kHybridMethod: default:
-			if ((mfMax - mfMin) >= (0.9f * 255.0f)) {
-				mfCurrentSpeedKts = mfPPSToKts * mfAvgPulsesPerSecond;
+			if (fPeakPeakVolts > (0.9f * kADCRange)) {
+				mfCurrentSpeedKts = fPPSBasedSpeed;
 			}
 			else {
-				mfCurrentSpeedKts = (0.5f * (mfPPSToKts * mfAvgPulsesPerSecond)) + (0.5f * (mfPulseMagnitudeToKts * (mfMax - mfMin)));
+				mfCurrentSpeedKts = (0.5f * fPPSBasedSpeed) + (0.5f * fPeakBasedSpeed);
 			}
 			break;
 		}
@@ -250,14 +261,15 @@ static const char *_methodToString(const SpeedMeasurement::EMethod &eMethod) {
 }
 
 void SpeedMeasurement::reportParameters(void) const {
-    printf("\tPPS to Kts = %.2f\r\n", mfPPSToKts);
-    printf("\tPulse Magnitude to Kts = %.2f\r\n", mfPulseMagnitudeToKts);
+    printf("\tPPS to Kts (PPS/kt) = %.2f\r\n", mfPPSToKts);
+    printf("\tPulse Magnitude to Kts (V/kt) = %.2f\r\n", mfPulseMagnitudeToKts);
     printf("\tPeak decay time constant = %.2f\r\n", mfPeakDecayTC);
     printf("\tAverage filter time constant = %.2f\r\n", mfAvgFilterTC);
-    printf("\tEdge threshold (of peak) = %.3f, hysteresis (of threshold) = %.3f\r\n", mfEdgeThresholdProportion, mfEdgeHysteresis);
+    printf("\tPPS filter time constant = %.2f\r\n", mfPPSFilterTC);
+    printf("\tEdge threshold (of peak) = %.3f\r\n\tHysteresis (of threshold) = %.3f\r\n", mfEdgeThresholdProportion, mfEdgeHysteresis);
     printf("\tMinimum pulse magnitude (counts) = %d\r\n", muMinimumPulseMagnitude);
     printf("\tPPS averaging constant = %.2f\r\n", mfPPSAvgConst);
-    printf("\tmeasurement method: %s", _methodToString(meMethod));
+    printf("\tmeasurement method: %s\r\n", _methodToString(meMethod));
 }
 
 void SpeedMeasurement::reportDynamicState(void) const {

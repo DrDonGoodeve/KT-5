@@ -63,7 +63,7 @@
 
 // Settings information
 #define kKtsPositions   (9)
-#define kSettingsMagic  (0x5e771236)
+#define kSettingsMagic  (0x5e771237)
 
 
 // Local types
@@ -108,6 +108,7 @@ class Settings {
         float mfPulseMagnitudeToKts;
         float mfPeakDecayTC;
         float mfAvgFilterTC;
+        float mfPPSFilterTC;
         float mfEdgeThreshold;
         float mfEdgeHysteresis;
         float mfPPSAvgConst;
@@ -124,12 +125,13 @@ class Settings {
     kDefaultPulseMagToKts,
     kDefaultPeakDecayTC,
     kDefaultAvgFilterTC,
+    kDefaultPPSFilterTC,
     kDefaultEdgeThreshold,
     kDefaultEdgeHysteresis,
     kDefaultPPSAvgConstant,
     kMinimumPulseMagnitude,
     kDefaultNoiseThreshold,
-    SpeedMeasurement::EMethod::kPulseMethod
+    SpeedMeasurement::EMethod::kHybridMethod
  };
 
 // The servo is not centered on the dial - and hence to get the digits lining
@@ -183,6 +185,7 @@ typedef enum {
     kSetPulseMagToKts,  // Set conversion factor from pulse max/min to Kts
     kSetPeakDecayTC,    // Set peak decay time constant in seconds
     kSetAvgFilterTC,    // Set average filtering time constant in seconds
+    kSetPPSFilterTC,    // Set PPS filtering time constant (decay to zero)
     kSetNoiseThreshold, // Set noise threshold (max-min) in counts
     kSetEdgeThreshold,  // Set edge threshold as a proportion of peak level vs. avg
     kSetEdgeHysteresis, // Set hysteresis for edge detector as a proportion of threshold
@@ -193,6 +196,7 @@ typedef enum {
     kSetServoKts,    // <kts> <posn> set kts map to posn
     kServoOn,        // servo response on
     kServoPos,       // set servo position
+    kServoPul,       // report servo pulse timing
     kServoTime,      // set servo min and max pulse
     kServoRate,      // set servo tracking rate
     kReportADC,      // report captured data
@@ -215,6 +219,7 @@ static const struct {
     {"pmag2kts", kSetPulseMagToKts, 3, "- set conversion factor from pulse max/min to Kts"},
     {"pktc", kSetPeakDecayTC, 3, "- set peak decay time constant in seconds"},
     {"avtc", kSetAvgFilterTC, 3, "- set average filtering time constant in seconds"},
+    {"ppstc", kSetPPSFilterTC, 3, "- set PPS filtering time constant in seconds"},
     {"nth", kSetNoiseThreshold, 1, "- set noise threshold (max-min) in counts"},
     {"edth", kSetEdgeThreshold, 3, "- set edge threshold (of peak/avg)"},
     {"edhy", kSetEdgeHysteresis, 3, "- set hysteresis (of threshold)"},
@@ -225,6 +230,7 @@ static const struct {
     {"setsp", kSetServoKts, 2, "<kts> <posn> - set mapping of kts to servo posn"},
     {"sauto", kServoOn, 0, "- switch servo to auto (default)"},
     {"spos", kServoPos, 1, "<posn> - set servo auto tracking off and move to posn"},
+    {"spul", kServoPul, 0, "- report servo pulse length limits"},
     {"stime", kServoTime, 2, "<min> <max> servo pulse in units of 10us - add 300us"},
     {"srate", kServoRate, 1, "<rate> - set servo tracking rate (1-255)"},
     {"radc", kReportADC, 1, "<centisec> - report centisec of ADC samples"},
@@ -251,6 +257,8 @@ class _Command {
 
             // Decompose sInput into sTag, sArgss
             std::string sTag(sInput);
+            size_t iFirst(sTag.find_first_not_of(" \t\r\n")), iLast(sTag.find_last_not_of(" \t\r\n"));
+            sTag = sTag.substr(iFirst, (iLast-iFirst)+1);
             size_t iSpace(sInput.find(" "));
             sTag = (iSpace != std::string::npos)?sInput.substr(0, iSpace):sTag;
             std::string sArgs((iSpace != std::string::npos)?sInput.substr(iSpace+1):"");
@@ -279,8 +287,9 @@ class _Command {
                 uArgNumber++;
 
                 // Interpret sArg
-                if (uArgsExpected == 3) {   // Special value - denotes expected single floating point number
+                if (3 == uArgsExpected) {   // Special value - denotes expected single floating point number
                     float fNumber(stof(sArg));
+                    //printf("sArg = %s, fNumber = %.2f\r\n", sArg.c_str(), fNumber);
                     float16 f16(fNumber);
                     f16.getBytes(muData1, muData2);
                     break;
@@ -309,13 +318,17 @@ class _Command {
 
             // Handle here (return kIgnore) or return valid command code?
             switch(muOpCode) {
-                case kHelp:
+                case kHelp: {
                     muOpCode = kIgnore; // Always runs on core1 - aid with debugging
-                    printf(kAppName " version " kVersion "- commands:\r\n");
+                    absolute_time_t cTime(get_absolute_time());
+                    uint32_t uMsecSinceBoot(to_ms_since_boot(cTime));
+                    printf(kAppName " version " kVersion " (uptime %d seconds)\r\n", (uMsecSinceBoot/1000));
+                    printf("Commands:\r\n");
                     for(uint i=0; i<_arraysize(spCommands); i++) {
                         printf("\t%s %s\r\n", spCommands[i].pTag, spCommands[i].pInfo);
                     }
                     break;
+                }
 
                 case kRestart:
                     muOpCode = kIgnore;
@@ -426,7 +439,6 @@ int main(void) {
     guKT5Line = __LINE__;
     float fMinPulse(((float)scSettings.muServoMin * 10.0e-6f) + 300.0e-6f);
     float fMaxPulse(((float)scSettings.muServoMax * 10.0e-6f) + 300.0e-6f);
-    printf("Servo timing (%.0fus, %.0fus)\r\n", (fMinPulse*1.0e6f), (fMaxPulse*1.0e6f));
     Servo cDial(kDialServoGPIO, 1.0f, false, fMinPulse, fMaxPulse);
     cDial.setRate(scSettings.muServoRate);
     sleep_ms(400);
@@ -504,9 +516,10 @@ guKT5Line = __LINE__;
         // Process any command received
 guKT5Line = __LINE__;
         _Command cCommand;
-        float16 f16(cCommand.muData1, cCommand.muData2);
-        float fArg(f16.getFloat32());
         if (true == _getCommand(cCommand)) {
+            float16 f16(cCommand.muData1, cCommand.muData2);
+            float fArg(f16.getFloat32());            
+            //printf("muData1:0x%02x, muData2:0x%02x, fArg:.2f\r\n", cCommand.muData1, cCommand.muData2, fArg);
             switch(cCommand.muOpCode) {
                 case kMeasure: 
                     printf("Transducer signal processing:\r\n");
@@ -540,6 +553,12 @@ guKT5Line = __LINE__;
                     scSettings.mfAvgFilterTC = fArg;
                     cMeasure.setAvgFilterTC(fArg);
                     printf("Average filter time constant = %.sfsec\r\n", fArg);
+                    break;
+
+                case kSetPPSFilterTC:
+                    scSettings.mfPPSFilterTC = fArg;
+                    cMeasure.setPPSFilterTC(fArg);
+                    printf("PPS filter time constant = %.sfsec\r\n", fArg);
                     break;
 
                 case kSetNoiseThreshold:
@@ -617,6 +636,10 @@ guKT5Line = __LINE__;
                     cDial.setPosition(fPosn);
                     break;
                 }
+
+                case kServoPul:
+                    printf("Servo timing (%.0fus, %.0fus)\r\n", (fMinPulse*1.0e6f), (fMaxPulse*1.0e6f));
+                    break;
 
                 case kServoTime: {
                     scSettings.muServoMin = cCommand.muData1;
