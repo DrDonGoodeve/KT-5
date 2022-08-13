@@ -69,7 +69,7 @@ void SpeedMeasurement::setConstants(
     float fPeakDecayTC, float fAvgFilterTC, float fPPSFilterTC,
     uint8_t uNoiseThreshold,
     float fEdgeThreshold, float fEdgeHysteresis,
-    uint8_t uMinimumMagnitude, float fPPSAvgConstant,
+    uint8_t uMinimumMagnitude, float fPPSAvgConstant, float fMaxAcceptablePPS,
     EMethod eMethod) {
 
     mfPPSToKts = fPPSToKts;
@@ -82,6 +82,7 @@ void SpeedMeasurement::setConstants(
     mfEdgeHysteresis = fEdgeHysteresis;
     muMinimumPulseMagnitude = uMinimumMagnitude;
     mfPPSAvgConst = fPPSAvgConstant;
+    mfMaxAcceptablePPS = fMaxAcceptablePPS;
     meMethod = eMethod;
 }
 
@@ -129,6 +130,18 @@ void SpeedMeasurement::setMethod(SpeedMeasurement::EMethod eMethod) {
     meMethod = eMethod;
 }
 
+const char *SpeedMeasurement::getMeasurementMethod(void) const {
+    switch(meMethod) {
+        case kPulseMethod: return "pulse";
+        case kRangeMethod: return "range";
+        case kHybridMethod: default: return "hybrid";
+    }
+}
+
+void SpeedMeasurement::setMaxAcceptablePPS(float fMaxAcceptablePPS) {
+    mfMaxAcceptablePPS = _max(kMinPPSLimit, fMaxAcceptablePPS);
+}
+
 /// ADCEngine::Consumer method
 void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
     uint8_t *pData(cFrame.mpSamples);
@@ -174,15 +187,19 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
         mfMin = (fSample < mfMin)?fSample:mfMin;
 
         // Edge-detector logic (state machine)
+        float fMinInterPulseTime(1.0f / mfMaxAcceptablePPS);
+        uint32_t uMinInterPulseSamples((uint32_t)roundf(fMinInterPulseTime * mfSampleRateHz));
         switch(meSignalState) {
             case kUndefinedSignal:
                 if (false == bPulsesValid) {
                     break;
                 }
                 if (fSample > fHighThreshold) {
-                    meSignalState = kInPositivePulse;
                     if (muLastRisingTrigger != 0) {
                         uint32_t uBetweenRisingEdges(uSampleNumber - muLastRisingTrigger);
+                        if (uBetweenRisingEdges < uMinInterPulseSamples) {
+                            break;  // Reject edges that come too fast - noise pulses
+                        }
                         float fRisingPPS(mfSampleRateHz / (float)uBetweenRisingEdges);
                         if (0.0f == mfAvgPulsesPerSecond) {
                             mfAvgPulsesPerSecond = fRisingPPS;
@@ -190,12 +207,15 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
                             mfAvgPulsesPerSecond = ((fRisingPPS * mfPPSAvgConst) + ((1.0f - mfPPSAvgConst) * mfAvgPulsesPerSecond));
                         }
                     }
+                    meSignalState = kInPositivePulse;
                     muLastRisingTrigger = uSampleNumber;
 
                 } else if (fSample < fLowThreshold) {
-                    meSignalState = kInNegativePulse;
                     if (muLastFallingTrigger != 0) {
                         uint32_t uBetweenFallingEdges(uSampleNumber - muLastFallingTrigger);
+                         if (uBetweenFallingEdges < uMinInterPulseSamples) {
+                            break;  // Reject edges that come too fast - noise pulses
+                        }
                         float fFallingPPS(mfSampleRateHz / (float)uBetweenFallingEdges);
                         if (0.0f == mfAvgPulsesPerSecond) {
                             mfAvgPulsesPerSecond = fFallingPPS;
@@ -203,6 +223,7 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
                             mfAvgPulsesPerSecond = ((fFallingPPS * mfPPSAvgConst) + ((1.0f - mfPPSAvgConst) * mfAvgPulsesPerSecond));
                         }
                     }
+                    meSignalState = kInNegativePulse;
                     muLastFallingTrigger = uSampleNumber;
                 }
                 break;
@@ -213,6 +234,7 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
 					muPulseCount++;
                 }
                 break;
+
             case kInNegativePulse:
                 if (fSample > fLowReleaseThreshold) {
                     meSignalState = kUndefinedSignal;
@@ -228,23 +250,24 @@ void SpeedMeasurement::process(const ADCEngine::Frame &cFrame) {
 
     // End of frame - update all measurements
     // I now have updated/filtered values of mfMax, mfMin, mfAvg, mfAvgPulsesPerSecond
-    float fPeakCounts((((mfMax - mfMin) > (float)muNoiseThreshold) ? (mfMax - mfMin) : 0.0f));
-    float fPeakPeakVolts(fPeakCounts * kADCResolutionVolts);
-    float fPeakBasedSpeed(mfPulseMagnitudeToKts * fPeakPeakVolts);
+    float fRange(mfMax - mfMin), fNoiseThreshold((float)muNoiseThreshold);
+    float fPeakCounts(((fRange > fNoiseThreshold) ? fRange : 0.0f));
+    float fSignalVolts(fPeakCounts * kADCResolutionVolts);
+    float fMagnitudeBasedSpeed(mfPulseMagnitudeToKts * fSignalVolts);
     float fPPSBasedSpeed(mfPPSToKts * mfAvgPulsesPerSecond);
 	switch (meMethod) {
 		case kPulseMethod:
 			mfCurrentSpeedKts = fPPSBasedSpeed;
 			break;
 		case kRangeMethod:
-			mfCurrentSpeedKts = fPeakBasedSpeed;
+			mfCurrentSpeedKts = fMagnitudeBasedSpeed;
 			break;
 		case kHybridMethod: default:
-			if (fPeakPeakVolts > (0.9f * kADCRange)) {
+			if (fSignalVolts > (0.9f * kADCRange)) {
 				mfCurrentSpeedKts = fPPSBasedSpeed;
 			}
 			else {
-				mfCurrentSpeedKts = (0.5f * fPPSBasedSpeed) + (0.5f * fPeakBasedSpeed);
+				mfCurrentSpeedKts = (0.5f * fPPSBasedSpeed) + (0.5f * fMagnitudeBasedSpeed);
 			}
 			break;
 		}
@@ -267,8 +290,10 @@ void SpeedMeasurement::reportParameters(void) const {
     printf("\tAverage filter time constant = %.2f\r\n", mfAvgFilterTC);
     printf("\tPPS filter time constant = %.2f\r\n", mfPPSFilterTC);
     printf("\tEdge threshold (of peak) = %.3f\r\n\tHysteresis (of threshold) = %.3f\r\n", mfEdgeThresholdProportion, mfEdgeHysteresis);
+    printf("\tNoise threshold (counts) = %d\r\n", muNoiseThreshold);
     printf("\tMinimum pulse magnitude (counts) = %d\r\n", muMinimumPulseMagnitude);
     printf("\tPPS averaging constant = %.2f\r\n", mfPPSAvgConst);
+    printf("\tMax acceptable PPS = %.1f\r\n", mfMaxAcceptablePPS);
     printf("\tmeasurement method: %s\r\n", _methodToString(meMethod));
 }
 
@@ -276,6 +301,7 @@ void SpeedMeasurement::reportDynamicState(void) const {
     printf("\tSignal (min:%.2f, avg:%.2f, max:%.2f, pk/pk:%.2f)\r\n", mfMin, mfAvg, mfMax, (mfMax-mfMin));
 	printf("\tSamples:%d, Pulses:%d\r\n", muSampleCount, muPulseCount);
 	printf("\tAvg PPS: %.2f\r\n", mfAvgPulsesPerSecond);
+    printf("\tMeasurement method: %s\r\n", getMeasurementMethod());
     printf("\tCurrent speed kts: %.3f\r\n", mfCurrentSpeedKts);
 }
 

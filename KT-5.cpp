@@ -37,7 +37,7 @@
 //*****************************************************************************
 // Application information
 #define kAppName                "KT-5"
-#define kVersion                "1.0"
+#define kVersion                "1.2"
 #define kAppInfo1               "@(4,16,-6)" kAppName
 #define kSlidePrefix            "@(2,%d,32)"
 #define kSlideAppInfo2          kSlidePrefix "reloaded..."
@@ -63,7 +63,7 @@
 
 // Settings information
 #define kKtsPositions   (9)
-#define kSettingsMagic  (0x5e771237)
+#define kSettingsMagic  (0x5e771238)
 
 
 // Local types
@@ -114,6 +114,7 @@ class Settings {
         float mfPPSAvgConst;
         uint8_t muMinimumMagnitude;
         uint8_t muNoiseThreshold;
+        float mfMaxAcceptablePPS;
         SpeedMeasurement::EMethod meMeasurementMethod;
 }scSettings = {
     kSettingsMagic,
@@ -131,6 +132,7 @@ class Settings {
     kDefaultPPSAvgConstant,
     kMinimumPulseMagnitude,
     kDefaultNoiseThreshold,
+    kDefaultMaxPPS,
     SpeedMeasurement::EMethod::kHybridMethod
  };
 
@@ -191,6 +193,7 @@ typedef enum {
     kSetEdgeHysteresis, // Set hysteresis for edge detector as a proportion of threshold
     kSetMinPulseMagnitude,  // Pulses below this magnitude are not measured
     kSetPPSAveragingConstant,   // Proportion of each new measurement to contribute to tracking value
+    kSetMaxPPS,         // Set maximum PPS limit for measurement code
     kSetMeasurementMethod,      // Set measurement method 0-pulse, 1-range, 2-hybrid
     kReportServoKts, // Report servo posn map to kts
     kSetServoKts,    // <kts> <posn> set kts map to posn
@@ -225,6 +228,7 @@ static const struct {
     {"edhy", kSetEdgeHysteresis, 3, "- set hysteresis (of threshold)"},
     {"minmag", kSetMinPulseMagnitude, 3, "- min pulse magnitude"},
     {"ppsac", kSetPPSAveragingConstant, 3, "- set new measurement contribution"},
+    {"maxpps", kSetMaxPPS, 3, "- set maximum acceptable PPS measurement"},
     {"mmeth", kSetMeasurementMethod, 1, "- set method 0-pulse, 1-range, 2-hybrid"},
     {"serkts", kReportServoKts, 0, "- show mappings of kts to servo posn"},
     {"setsp", kSetServoKts, 2, "<kts> <posn> - set mapping of kts to servo posn"},
@@ -419,7 +423,14 @@ int main(void) {
     // Setup connection to HC-05
     HC05 cBluetooth;
 
-    // Banner display
+    // Alive LED
+    guKT5Line = __LINE__;
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    gpio_put(PICO_DEFAULT_LED_PIN, 0);
+    bool bAliveLEDOn(false);
+
+    // Banner display (startup)
     guKT5Line = __LINE__;
     for(uint i=128; i>2; i--) {
         char pBuffer[64];
@@ -435,17 +446,14 @@ int main(void) {
         sleep_ms(5);
     }
 
-    // Create dial servo object and zero position
+    // Launch command processor on core1
     guKT5Line = __LINE__;
-    float fMinPulse(((float)scSettings.muServoMin * 10.0e-6f) + 300.0e-6f);
-    float fMaxPulse(((float)scSettings.muServoMax * 10.0e-6f) + 300.0e-6f);
-    Servo cDial(kDialServoGPIO, 1.0f, false, fMinPulse, fMaxPulse);
-    cDial.setRate(scSettings.muServoRate);
-    sleep_ms(400);
-    cDial.setPosition(0.0f, false);
-    sleep_ms(400);
+    multicore_launch_core1(_commandProcessor);
 
-    // Open flash memory archive and retrieve current settings (if present)
+    // Setup display update rollover timer
+    add_repeating_timer_ms(kDisplayUpdateTimerPeriod, _displayUpdateCallback, nullptr, &mcDisplayTimer);
+
+    // Open flash memory archive and retreive current settings (if present)
     Flash cFlash;
     uint8_t uSize(0);
     const uint8_t *pFlashSettings(cFlash.readBlock(kKT5SettingsSignature, uSize));
@@ -454,29 +462,37 @@ int main(void) {
         printf("Loaded saved settings from flash...\r\n");
     }
 
-    // Alive LED
+    // Create dial servo object and zero position
     guKT5Line = __LINE__;
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-    gpio_put(PICO_DEFAULT_LED_PIN, 0);
-    bool bAliveLEDOn(false);
-
-    // Launch command processor on core1
-    guKT5Line = __LINE__;
-    multicore_launch_core1(_commandProcessor);
+    float fMinServoPulseWidth(((float)scSettings.muServoMin * 10.0e-6f) + 300.0e-6f);
+    float fMaxServoPulseWidth(((float)scSettings.muServoMax * 10.0e-6f) + 300.0e-6f);
+    Servo cDial(kDialServoGPIO, 1.0f, false, fMinServoPulseWidth, fMaxServoPulseWidth);
+    cDial.setRate(scSettings.muServoRate);
+    sleep_ms(400);
+    cDial.setPosition(0.0f, false);
+    sleep_ms(400);
 
     // Create measurement object
     guKT5Line = __LINE__;
     SpeedMeasurement cMeasure(kSampleRateHz);
+    cMeasure.setPPSToKts(scSettings.mfPPSToKts);
+    cMeasure.setPulseMagnitudeToKts(scSettings.mfPulseMagnitudeToKts);
+    cMeasure.setPeakDecayTC(scSettings.mfPeakDecayTC);
+    cMeasure.setAvgFilterTC(scSettings.mfAvgFilterTC);
+    cMeasure.setPPSFilterTC(scSettings.mfPPSFilterTC);
+    cMeasure.setEdgeThreshold(scSettings.mfEdgeThreshold);
+    cMeasure.setEdgeHysteresis(scSettings.mfEdgeHysteresis);
+    cMeasure.setPPSAvgConst(scSettings.mfPPSAvgConst);
+    cMeasure.setMinimumPulseMagnitude(scSettings.muMinimumMagnitude);
+    cMeasure.setNoiseThreshold(scSettings.muNoiseThreshold);
+    cMeasure.setMaxAcceptablePPS(scSettings.mfMaxAcceptablePPS);
+    cMeasure.setMethod(scSettings.meMeasurementMethod);
 
     // Create ADCEngine and start sampling
     guKT5Line = __LINE__;
     ADCEngine cADC(kADCChannel, kSampleRateHz, kADCBuffer, kADCFrames);
     guKT5Line = __LINE__;
     cADC.setActive(true);
-
-    // Setup display update rollover timer
-    add_repeating_timer_ms(kDisplayUpdateTimerPeriod, _displayUpdateCallback, nullptr, &mcDisplayTimer);
 
     // Main loop
     bool bServoAuto(true);
@@ -563,6 +579,7 @@ guKT5Line = __LINE__;
 
                 case kSetNoiseThreshold:
                     scSettings.muNoiseThreshold = cCommand.muData1;
+                    cMeasure.setNoiseThreshold(cCommand.muData1);
                     printf("Noise threshold (max-min) = %d\r\n", cCommand.muData1);
                     break;
                 
@@ -589,6 +606,12 @@ guKT5Line = __LINE__;
                     cMeasure.setPPSAvgConst(fArg);
                     printf("PPS averaging constant = %.3f\r\n", fArg);
                     break;
+
+                case kSetMaxPPS:
+                    scSettings.mfMaxAcceptablePPS = fArg;
+                    cMeasure.setMaxAcceptablePPS(scSettings.mfMaxAcceptablePPS);
+                    printf("Max acceptable PPS = %.1f\r\n", scSettings.mfMaxAcceptablePPS);
+                    break;
                 
                 case kSetMeasurementMethod:
                     if (cCommand.muData1 > 2) {
@@ -596,7 +619,7 @@ guKT5Line = __LINE__;
                     } else {
                         scSettings.meMeasurementMethod = (SpeedMeasurement::EMethod)cCommand.muData1;
                         cMeasure.setMethod(scSettings.meMeasurementMethod);
-                        printf("Measurement method %d\r\n", cCommand.muData1);
+                        printf("Measurement method: %s\r\n", cMeasure.getMeasurementMethod());
                     }
                     break;
 
@@ -637,9 +660,12 @@ guKT5Line = __LINE__;
                     break;
                 }
 
-                case kServoPul:
+                case kServoPul: {
+                    float fMinPulse(((float)scSettings.muServoMin * 10.0e-6f) + 300.0e-6f);
+                    float fMaxPulse(((float)scSettings.muServoMax * 10.0e-6f) + 300.0e-6f);
                     printf("Servo timing (%.0fus, %.0fus)\r\n", (fMinPulse*1.0e6f), (fMaxPulse*1.0e6f));
                     break;
+                }
 
                 case kServoTime: {
                     scSettings.muServoMin = cCommand.muData1;

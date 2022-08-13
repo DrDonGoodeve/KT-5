@@ -25,6 +25,8 @@
 
 // Defines
 //-----------------------------------------------------------------------------
+#define kMinPPSLimit            (1.0f)
+#define kDefaultMaxPPS          (20.0f)
 #define kDefaultPPSToKts        (5.0f / 7.852f)
 #define kDefaultPulseMagToKts   (5.0f / 4.560f)
 #define kDefaultPeakDecayTC     (5.0f)
@@ -35,6 +37,8 @@
 #define kMinimumPulseMagnitude  (15)
 #define kDefaultNoiseThreshold  (5)
 #define kDefaultPPSAvgConstant  (0.2f)
+
+#define _max(a,b)   ((a)>(b)?(a):(b))
 
 
 // SpeedMeasurement class
@@ -83,6 +87,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         uint8_t muMinimumPulseMagnitude;  // Less than this min/max is considered noise and ignored
         uint8_t muNoiseThreshold;         // Subtracted from min/max to give actual peak-peak
 		uint32_t muPulseCount;			  // Number of pulses detected since run start
+        float mfMaxAcceptablePPS;      // Threshold maximum pulse detection rate (filter out high-speed noise)
 
         // Derived measurements
         float mfPPSAvgConst;            // Contribution to running average of a new PPS measurement
@@ -121,6 +126,7 @@ class SpeedMeasurement : public ADCEngine::Consumer {
             float fEdgeHysteresis=kDefaultEdgeHysteresis,
             uint8_t uMinimumMagnitude=kMinimumPulseMagnitude,
             float fPPSAvgConst=kDefaultPPSAvgConstant,
+            float fMaxAcceptablePPS=kDefaultMaxPPS,
             EMethod eMethod=kHybridMethod
         );
 
@@ -135,6 +141,8 @@ class SpeedMeasurement : public ADCEngine::Consumer {
         void setMinimumPulseMagnitude(uint8_t uMinimumMagnitude);
         void setPPSAvgConst(float fPPSAvgConstant);
         void setMethod(SpeedMeasurement::EMethod eMethod);
+        const char *getMeasurementMethod(void) const;
+        void setMaxAcceptablePPS(float fMaxAcceptablePPS);
 
         /// ADCEngine::Consumer method
         virtual void process(const ADCEngine::Frame &cFrame);
